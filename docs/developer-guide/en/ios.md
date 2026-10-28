@@ -52,6 +52,8 @@ Validate affected unit tests on a supported Linux host by following [Write and r
 - `Info.plist`: source revision, platform and minimum OS version
 - `build-manifest.json`, `rust-Cargo.lock`, and `Licenses.tar`: linked archive hashes, dependency source records, and license notices
 
+Rust license collection belongs to the packaging rules in `package/ios`. It follows the dependency graph selected for the target platform and extracts notices from the package source inputs declared by crate_universe. Rust compilation targets do not receive injected license runtime data. The framework packaging action consumes `//package/ios:rust_licenses` and `//package/ios:rust_license_files`.
+
 The device and simulator frameworks are not interchangeable. The framework is not signed for distribution; Xcode signs it with the app when it is added with **Embed & Sign**.
 
 ## Use it in an app

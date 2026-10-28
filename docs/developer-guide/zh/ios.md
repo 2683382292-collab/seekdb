@@ -52,8 +52,6 @@ build/bin/src/observer/framework/SeekDB.framework
 - `Info.plist`：源码 revision、平台和最低系统版本
 - `build-manifest.json`、`rust-Cargo.lock`、`Licenses.tar`：链接归档哈希、依赖来源记录和许可证
 
-Rust 许可证收集由 `package/ios` 的打包规则负责。它沿当前目标平台选中的依赖图，从 crate_universe 已声明的包源码输入中提取 notices；普通 Rust target 不再注入许可证 runtime data。打包入口是 `//package/ios:rust_licenses` 和 `//package/ios:rust_license_files`，清单及文件作为 Framework 打包动作的输入。
-
 真机和模拟器的 framework 不能混用。framework 没有用于分发的签名；在 Xcode 中以 **Embed & Sign** 方式加入 App 后，会随 App 一起签名。
 
 ## 在 App 中使用

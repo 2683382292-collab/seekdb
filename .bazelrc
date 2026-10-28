@@ -42,6 +42,7 @@ build:ios-simulator --config=ios
 build:ios-simulator --platforms=@apple_support//platforms:ios_sim_arm64
 build:wasm --platforms=//bazel/platforms:wasm32
 build:wasm --@rules_rust//rust/toolchain/channel=nightly
+build:wasm --@rules_rust//cargo/settings:use_default_shell_env=true
 build:wasm --//src/standby:enable_standby=false
 build:wasm --action_env=EM_CONFIG
 build:wasm --action_env=EMSDK_PYTHON

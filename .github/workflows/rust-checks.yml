@@ -85,7 +85,6 @@ jobs:
           cargo check --locked --workspace --target x86_64-pc-windows-gnu
 
       - name: cargo audit
-        working-directory: rust
         run: |
           command -v cargo-audit >/dev/null 2>&1 || cargo install cargo-audit --locked
           cargo audit

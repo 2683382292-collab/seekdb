@@ -1,6 +1,6 @@
 """CXX interfaces exposed to C++ callers; Rust targets live in each crate."""
 
-load("//rust/sql-nio:features.bzl", "NATIVE_FEATURES")
+load("//rust/sql-nio:features.bzl", "FEATURES")
 
 MODULES = {
     "local": {
@@ -16,7 +16,7 @@ MODULES = {
     "sql-nio": {
         "bridge": "src/bridge.rs",
         "headers": ["include/callbacks.h"],
-        "features": NATIVE_FEATURES,
+        "features": FEATURES,
     },
     "regex-engine": {"bridge": "src/bridge.rs"},
     "uuid-generator": {"bridge": "src/bridge.rs"},

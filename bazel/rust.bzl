@@ -39,7 +39,10 @@ def rust_modules(modules, generated_headers = []):
             src = "//rust/" + crate + ":" + module["bridge"],
             hdrs = ["//rust/" + crate + ":" + header for header in module.get("headers", [])],
             deps = module.get("deps", []),
-            cfgs = ['feature="%s"' % feature for feature in module.get("features", [])],
+            cfgs = select({
+                platform: ['feature="%s"' % feature for feature in features]
+                for platform, features in module.get("features", {"//conditions:default": []}).items()
+            }),
         )
         headers.append(name + ".h")
         excluded = module.get("exclude_platforms", [])

@@ -32,7 +32,7 @@ The Cargo workspace manifest, lockfile, and toolchain pin live at the repository
 
 Use rust/logger/BUILD.bazel as a small example, or rust/config/BUILD.bazel for generated inputs. Add a module that belongs in the final archive to rust/seekdb-rust's Cargo.toml, BUILD.bazel, and src/lib.rs. CXX interfaces are registered in rust/modules.bzl, which also collects bridge objects for the final C++ link. Share feature constants between a Rust target and its CXX generator when needed, as sql-nio does. New modules do not require changes to MODULE.bazel, SDK initialization, or the C++ link list.
 
-This simplification is validated for local Linux builds. Wasm dependency selection and nightly toolchain integration are deferred; previous platform validation applies to the earlier implementation. The business build no longer generates temporary manifests or translates Cargo metadata with a project script. Ordinary builds track manifest and lockfile changes without another init.
+Native targets use the pinned stable Rust SDK. Wasm uses its pinned nightly and the patched standard library prepared by `init --wasm`. Cargo target dependencies select the platform's community dependencies; the shared sql-nio feature map selects native networking or Wasm memory transport for both Rust and CXX. Ordinary builds track manifest and lockfile changes without another init.
 
 ## Set build concurrency
 

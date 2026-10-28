@@ -20,6 +20,10 @@ rust.toolchain(versions = [])
 installed_rust_repository = use_repo_rule("//bazel:rust_toolchain.bzl", "installed_rust_repository")
 installed_rust_repository(name = "rust_native")
 register_toolchains("@rust_native//:all")
+installed_rust_repository(name = "rust_wasm", kind = "wasm")
+register_toolchains("@rust_wasm//:all")
+wasm_std_repository = use_repo_rule("//bazel:rust_toolchain.bzl", "wasm_std_repository")
+wasm_std_repository(name = "rust_wasm_std")
 cxxbridge_repository = use_repo_rule("//bazel:rust_repositories.bzl", "cxxbridge_repository")
 cxxbridge_repository(name = "cxxbridge_source")
 
@@ -34,6 +38,13 @@ crate.annotation(
     repositories = ["rust_crates"],
     additive_build_file = "//bazel:cxx_runtime.BUILD.bazel",
 )
+crate.annotation(
+    crate = "spdlog-rs",
+    version = "0.5.3",
+    repositories = ["rust_crates"],
+    patches = ["//bazel:spdlog-rs-emscripten.diff"],
+    patch_args = ["-p1"],
+)
 _RUST_PLATFORMS = [
     "x86_64-unknown-linux-gnu",
     "aarch64-unknown-linux-gnu",
@@ -44,6 +55,7 @@ _RUST_PLATFORMS = [
     "aarch64-linux-android",
     "aarch64-apple-ios",
     "aarch64-apple-ios-sim",
+    "wasm32-unknown-emscripten",
 ]
 crate.from_cargo(
     name = "rust_crates",

@@ -38,7 +38,7 @@ Rust workspace 的 `Cargo.toml`、`Cargo.lock` 和 `rust-toolchain.toml` 位于�
 
 CXX 的 `features` 与 Rust 编译启用的 features 必须一致。需要共享时使用模块内的常量文件，例如 `rust/sql-nio/features.bzl`，由 BUILD 和接口表同时引用。`exclude_platforms` 继续控制 CXX 桥接的平台可用性。仅供 Rust 调用的 crate 不登记 CXX 接口。
 
-这轮构建结构收敛以 Linux 本地编译为验收范围。Wasm 的依赖图和 nightly 工具链需要按新结构重新接入；旧版跨平台验收记录不代表新结构已通过相同验证。
+原生目标使用固定版本的 stable Rust SDK。Wasm 使用固定版本的 nightly，以及 `init --wasm` 准备的带补丁标准库。Cargo 的目标依赖声明选择各平台的社区依赖；sql-nio 共享的 feature 表让 Rust 和 CXX 一致选择原生网络或 Wasm 内存传输。
 
 ## 设置编译并发
 

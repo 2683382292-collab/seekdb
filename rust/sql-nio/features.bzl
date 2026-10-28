@@ -1,3 +1,6 @@
-"""Features shared by the native Rust library and its CXX generator."""
+"""Transport features shared by the Rust library and its CXX generator."""
 
-NATIVE_FEATURES = ["native-network"]
+FEATURES = {
+    "@platforms//os:emscripten": ["memory-transport"],
+    "//conditions:default": ["native-network"],
+}

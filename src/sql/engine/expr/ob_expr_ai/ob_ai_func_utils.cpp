@@ -283,7 +283,7 @@ int ObOpenAIUtils::ObOpenAIEmbed::parse_output(common::ObIAllocator &allocator,
       for (int64_t i = 0; OB_SUCC(ret) && i < count; i++) {
         if (OB_ISNULL(slots[i])) {
           ret = OB_INVALID_DATA;
-        } else if (OB_FAIL(result_array->append(slots[i]))) {
+        } else if (OB_FAIL(result_array->append(static_cast<ObJsonNode *>(slots[i])))) {
         }
       }
       if (OB_SUCC(ret)) {

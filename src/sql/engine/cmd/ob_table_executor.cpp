@@ -27,6 +27,7 @@
 #include "sql/engine/expr/ob_expr_regexp_context.h"  // ObExprRegexpSessionVariables (unity regroup)
 #include "sql/engine/cmd/ob_index_executor.h"
 #include "sql/engine/cmd/ob_ddl_executor_util.h"
+#include "sql/engine/cmd/ob_ai_column_service.h"
 #include "sql/resolver/ddl/ob_create_table_stmt.h"
 #include "sql/resolver/ddl/ob_alter_table_stmt.h"
 #include "sql/resolver/ddl/ob_drop_table_stmt.h"
@@ -499,6 +500,12 @@ int ObCreateTableExecutor::execute(ObExecContext &ctx, ObCreateTableStmt &stmt)
       "table_info", res.table_id_,
       "schema_version", res.schema_version_);
     SQL_ENG_LOG(INFO, "finish create table execute.", K(ret), "ddl_event_info", ObDDLEventInfo(GCTX.self_addr()));
+    if (OB_SUCC(ret) && !table_schema.is_view_table() && common::OB_INVALID_ID != res.table_id_) {
+      int tmp_ret = ObAIColumnService::persist_table(my_session, res.table_id_);
+      if (OB_SUCCESS != tmp_ret) {
+        LOG_WARN("persist ai column metadata failed", K(tmp_ret), K(res.table_id_));
+      }
+    }
 
     // only CTAS or create temporary table will make session_id != 0. If such table detected, set
     // need ctas cleanup task anyway to do some cleanup jobs
@@ -754,6 +761,15 @@ int ObAlterTableExecutor::alter_table_exchange_partition_rpc(obcall::ObExchangeP
 int ObAlterTableExecutor::execute(ObExecContext &ctx, ObAlterTableStmt &stmt)
 {
   int ret = OB_SUCCESS;
+  if (stmt.is_ai_column_retry()) {
+    ObSQLSessionInfo *session = ctx.get_my_session();
+    if (OB_ISNULL(session)) {
+      ret = OB_ERR_UNEXPECTED;
+    } else if (OB_FAIL(ObAIColumnService::retry(session, stmt.ai_retry_table_id(),
+                                                stmt.ai_retry_column_name(), stmt.ai_retry_where()))) {
+    }
+    return ret;
+  }
   ObSqlExecutorCtx *task_exec_ctx = NULL;
   obcall::ObAlterTableArg &alter_table_arg = stmt.get_alter_table_arg();
   obcall::ObExchangePartitionArg &exchange_partition_arg = stmt.get_exchange_partition_arg();
@@ -878,6 +894,12 @@ int ObAlterTableExecutor::execute(ObExecContext &ctx, ObAlterTableStmt &stmt)
       "table_info", table_info_buffer,
       "schema_version", res.schema_version_);
     SQL_ENG_LOG(INFO, "finish alter table execute.", K(ret), "ddl_event_info", ObDDLEventInfo(GCTX.self_addr()), K(first_stmt));
+    if (OB_SUCC(ret) && common::OB_INVALID_ID != alter_table_arg.table_id_) {
+      int tmp_ret = ObAIColumnService::persist_table(my_session, alter_table_arg.table_id_);
+      if (OB_SUCCESS != tmp_ret) {
+        LOG_WARN("persist ai column metadata failed", K(tmp_ret), K(alter_table_arg.table_id_));
+      }
+    }
   }
   return ret;
 }

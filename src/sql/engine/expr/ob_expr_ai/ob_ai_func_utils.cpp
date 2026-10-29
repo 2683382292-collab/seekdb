@@ -1485,6 +1485,48 @@ int ObAIFuncModel::call_completion(ObString &prompt, ObJsonObject *config, ObStr
   return ret;
 }
 
+int ObAIFuncModel::call_completion_with_system(ObString &system_prompt, ObString &content, ObJsonObject *config, ObString &result)
+{
+  int ret = OB_SUCCESS;
+  ObArray<ObString> headers;
+  ObJsonObject *body = nullptr;
+  ObJsonObject *response = nullptr;
+  ObIJsonBase *result_base = nullptr;
+  ObAIFuncIComplete *complete_provider = nullptr;
+  ObString result_str;
+  ObAIFuncClient client;
+  ObString unencrypted_access_key;
+  ObString request_model_name = get_request_model_name();
+  if (!is_completion_type()) {
+    ret = OB_INVALID_ARGUMENT;
+  } else if (content.empty()) {
+    ret = OB_INVALID_ARGUMENT;
+  } else if (OB_FAIL(ObAIFuncUtils::get_complete_provider(*allocator_, endpoint_info_.get_provider(), complete_provider))) {
+  } else if (OB_FAIL(endpoint_info_.get_unencrypted_access_key(*allocator_, unencrypted_access_key))) {
+  } else if (OB_FAIL(complete_provider->get_header(*allocator_, unencrypted_access_key, headers))) {
+  } else if (OB_FAIL(complete_provider->get_body(*allocator_, request_model_name, system_prompt, content, config, body))) {
+  } else if (OB_FAIL(client.send_post(*allocator_, endpoint_info_.get_url(), headers, body, response))) {
+  } else if (OB_FAIL(complete_provider->parse_output(*allocator_, response, result_base))) {
+  } else if (OB_ISNULL(result_base) || result_base->json_type() == ObJsonNodeType::J_NULL) {
+    ret = OB_INVALID_DATA;
+  } else if (result_base->json_type() == ObJsonNodeType::J_STRING) {
+    ObString raw = static_cast<ObJsonString *>(result_base)->get_str();
+    char *copy = static_cast<char *>(allocator_->alloc(raw.length() > 0 ? raw.length() : 1));
+    if (OB_ISNULL(copy)) {
+      ret = OB_ALLOCATE_MEMORY_FAILED;
+    } else if (raw.length() == 0) {
+      result.assign_ptr("", 0);
+    } else {
+      MEMCPY(copy, raw.ptr(), raw.length());
+      result.assign_ptr(copy, static_cast<int32_t>(raw.length()));
+    }
+  } else if (OB_FAIL(ObAIFuncJsonUtils::print_json_to_str(*allocator_, result_base, result_str))) {
+  } else {
+    result = result_str;
+  }
+  return ret;
+}
+
 int ObAIFuncModel::call_completion_vector(ObArray<ObString> &prompts, ObJsonObject *config, ObArray<ObString> &results)
 {
   int ret = OB_SUCCESS;

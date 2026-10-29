@@ -25,6 +25,7 @@
 #include "sql/session/ob_local_session_var.h"
 #include "query/command/ob_root_command_service.h"
 #include "query/vector/ob_vector_index_util.h"
+#include "sql/engine/cmd/ob_ai_column_service.h"
 
 namespace oceanbase
 {
@@ -393,6 +394,20 @@ int ObAlterTableResolver::resolve_action_list(const ParseNode &node)
     bool has_alter_partition = false;
     //in mysql mode, resolve add index after resolve column actions
     ObSEArray<int64_t, 4> add_index_action_idxs;
+    int64_t ai_retry_actions = 0;
+    int64_t alter_action_count = 0;
+    for (int64_t i = 0; OB_SUCC(ret) && i < node.num_child_; ++i) {
+      if (OB_NOT_NULL(node.children_[i])) {
+        ++alter_action_count;
+        if (T_AI_COLUMN_RETRY == node.children_[i]->type_) {
+          ++ai_retry_actions;
+        }
+      }
+    }
+    if (OB_SUCC(ret) && ai_retry_actions > 0 && alter_action_count > 1) {
+      ret = OB_NOT_SUPPORTED;
+      LOG_USER_ERROR(OB_NOT_SUPPORTED, "combining AI COLUMN RETRY with another ALTER action");
+    }
     for (int64_t i = 0; OB_SUCC(ret) && i < node.num_child_; ++i) {
       ParseNode *action_node = node.children_[i];
       if (OB_ISNULL(action_node)) {
@@ -582,6 +597,20 @@ int ObAlterTableResolver::resolve_action_list(const ParseNode &node)
             }
             break;
         }
+        case T_AI_COLUMN_RETRY: {
+            ObString retry_column;
+            ObString retry_where;
+            if (OB_ISNULL(table_schema_) || OB_ISNULL(allocator_) || OB_ISNULL(alter_table_stmt)) {
+              ret = OB_ERR_UNEXPECTED;
+            } else if (OB_FAIL(ObAIColumnService::prepare_retry(
+                           *allocator_, table_schema_->get_table_id(),
+                           action_node->children_[0], action_node->num_child_ > 1 ? action_node->children_[1] : nullptr,
+                           retry_column, retry_where))) {
+            } else {
+              alter_table_stmt->set_ai_column_retry(table_schema_->get_table_id(), retry_column, retry_where);
+            }
+            break;
+          }
         case T_MODIFY_ALL_TRIGGERS: {
             alter_table_stmt->set_is_alter_triggers(true);
             if (OB_FAIL(resolve_modify_all_trigger(*action_node))) {
@@ -3394,6 +3423,7 @@ int ObAlterTableResolver::process_timestamp_column(ObColumnResolveStat &stat,
 int ObAlterTableResolver::resolve_add_column(const ParseNode &node, ObColumnNameSet &add_column_names_set)
 {
   int ret = OB_SUCCESS;
+  ObAIColumnService::clear_staged();
   ObAlterTableStmt *alter_table_stmt = get_alter_table_stmt();
   if (OB_UNLIKELY(T_COLUMN_ADD != node.type_ || NULL == node.children_)) {
     ret = OB_ERR_UNEXPECTED;
@@ -3459,6 +3489,12 @@ int ObAlterTableResolver::resolve_add_column(const ParseNode &node, ObColumnName
           } else if (FALSE_IT(alter_table_stmt->set_sql_mode(session_info_->get_sql_mode()))) {
           }
         }
+      }
+    }
+    if (OB_SUCC(ret) && OB_NOT_NULL(alter_table_stmt) && OB_NOT_NULL(table_schema_)) {
+      if (OB_FAIL(ObAIColumnService::append_hidden_alter(
+              *alter_table_stmt, database_name_, table_name_, table_schema_->get_table_id()))) {
+        SQL_RESV_LOG(WARN, "add ai hidden columns failed", K(ret));
       }
     }
     add_column_cnt_++;

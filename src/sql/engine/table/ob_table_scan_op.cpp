@@ -30,6 +30,7 @@
 #include "sql/das/iter/ob_das_iter_utils.h"
 #include "sql/engine/px/ob_granule_iterator_op.h"
 #include "sql/engine/expr/ob_expr_lob_utils.h"
+#include "sql/engine/cmd/ob_ai_column_service.h"
 
 namespace oceanbase
 {
@@ -1435,6 +1436,8 @@ int ObTableScanOp::inner_open()
   init_scan_monitor_info();
   if (OB_ISNULL(my_session = GET_MY_SESSION(ctx_))) {
     ret = OB_ERR_UNEXPECTED;
+  } else if (OB_FAIL(ObAIColumnService::check_strict_read(
+                 my_session, MY_SPEC.ref_table_id_, MY_CTDEF.get_full_acccess_cids()))) {
   } else if (OB_FAIL(ObDASUtils::check_nested_sql_mutating(MY_SPEC.ref_table_id_, ctx_, true))) {
   } else if (OB_FAIL(init_table_scan_rtdef())) {
   } else if (MY_SPEC.is_fts_ddl_ && OB_FAIL(fts_index_.init(MY_SPEC.is_fts_index_aux_, MY_SPEC.parser_name_,

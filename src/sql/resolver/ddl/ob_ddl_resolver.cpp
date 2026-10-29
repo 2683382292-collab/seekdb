@@ -32,6 +32,7 @@
 #include "share/rc/ob_server_runtime.h"
 #include "share/schema/ob_table_schema.h"
 #include "sql/engine/expr/ob_obj_cast_runtime.h"
+#include "sql/engine/cmd/ob_ai_column_service.h"
 
 namespace oceanbase
 {
@@ -2284,6 +2285,12 @@ int ObDDLResolver::resolve_normal_column_attribute(ObColumnSchemaV2 &column,
       case T_VISIBLE:
       case T_INVISIBLE:
       {
+        break;
+      }
+      case T_AI_COLUMN_ATTR: {
+        if (OB_FAIL(ObAIColumnService::stage_column(column, attr_node))) {
+          SQL_RESV_LOG(WARN, "resolve ai column failed", K(ret));
+        }
         break;
       }
       default:  // won't be here

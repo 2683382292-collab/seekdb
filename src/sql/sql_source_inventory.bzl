@@ -300,6 +300,7 @@ SQL_UNITY_GROUPS = [
         language = "c++",
         srcs = [
             "src/sql/engine/cmd/ob_table_executor.cpp",
+            "src/sql/engine/cmd/ob_ai_column_service.cpp",
             "src/sql/engine/cmd/ob_tcl_executor.cpp",
             "src/sql/engine/cmd/ob_trigger_executor.cpp",
             "src/sql/engine/cmd/ob_user_cmd_executor.cpp",

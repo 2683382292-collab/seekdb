@@ -25,6 +25,7 @@
 #include "sql/optimizer/ob_optimizer_util.h"
 #include "query/vector/ob_vector_index_util.h"
 #include "sql/resolver/ddl/ob_vec_index_builder_util.h"
+#include "sql/engine/cmd/ob_ai_column_service.h"
 
 namespace oceanbase
 {
@@ -607,6 +608,7 @@ int ObCreateTableResolver::resolve_table_elements(const ParseNode *node,
                                                                           // Second parsing non-column
 {
   int ret = OB_SUCCESS;
+  ObAIColumnService::clear_staged();
   if (OB_ISNULL(node)) {
    // do nothing, create table t as select ... will come here
   } else if (OB_ISNULL(stmt_)
@@ -930,6 +932,12 @@ int ObCreateTableResolver::resolve_table_elements(const ParseNode *node,
       } else if (NULL == primary_node) {
         // do nothing
       } else if (OB_FAIL(resolve_primary_key_node(*primary_node, stats))) {
+      }
+      if (OB_SUCC(ret)) {
+        if (OB_FAIL(ObAIColumnService::append_hidden_columns(
+                table_schema, database_name_, table_name_, cur_column_id_))) {
+          SQL_RESV_LOG(WARN, "add ai hidden columns failed", K(ret));
+        }
       }
       if (OB_SUCC(ret)) {
         table_schema.set_max_used_column_id(cur_column_id_);

@@ -18,8 +18,6 @@
 
 #include "storage/fts/dict/ob_ft_dat_dict.h"
 
-#include <new>
-
 #include "lib/utility/alloc_assist.h"
 #include "lib/alloc/alloc_struct.h"
 #include "lib/allocator/ob_allocator.h"
@@ -248,89 +246,6 @@ int ObFTDATBuilder<DATA_TYPE>::encode(const ObString &word, ObFTWordCode &code, 
   return ret;
 }
 
-static bool utf8_bmp_codepoint(const char *p, int32_t len, uint32_t &cp)
-{
-  if (OB_ISNULL(p) || len <= 0) {
-    return false;
-  }
-  const unsigned char c0 = static_cast<unsigned char>(p[0]);
-  if (len == 1 && c0 < 0x80) {
-    cp = c0;
-    return true;
-  } else if (len == 2 && (c0 & 0xE0) == 0xC0) {
-    const unsigned char c1 = static_cast<unsigned char>(p[1]);
-    if ((c1 & 0xC0) != 0x80) {
-      return false;
-    }
-    cp = ((c0 & 0x1F) << 6) | (c1 & 0x3F);
-    return cp >= 0x80 && cp < 0x800;
-  } else if (len == 3 && (c0 & 0xF0) == 0xE0) {
-    const unsigned char c1 = static_cast<unsigned char>(p[1]);
-    const unsigned char c2 = static_cast<unsigned char>(p[2]);
-    if ((c1 & 0xC0) != 0x80 || (c2 & 0xC0) != 0x80) {
-      return false;
-    }
-    cp = ((c0 & 0x0F) << 12) | ((c1 & 0x3F) << 6) | (c2 & 0x3F);
-    return cp >= 0x800 && cp < 0x10000;
-  }
-  return false;
-}
-
-template <typename DATA_TYPE>
-std::atomic<int32_t> *ObFTDATReader<DATA_TYPE>::code_cache() const
-{
-  std::atomic<int32_t> *cache = cp_cache_.load(std::memory_order_acquire);
-  if (OB_NOT_NULL(cache)) {
-    return cache;
-  }
-  cache = new (std::nothrow) std::atomic<int32_t>[65536]();
-  std::atomic<int32_t> *expected = nullptr;
-  if (OB_ISNULL(cache)) {
-    return nullptr;
-  } else if (!cp_cache_.compare_exchange_strong(expected, cache, std::memory_order_release, std::memory_order_acquire)) {
-    delete[] cache;
-    return expected;
-  }
-  return cache;
-}
-
-template <typename DATA_TYPE>
-int ObFTDATReader<DATA_TYPE>::find_word_code(const ObString &ft_char,
-                                             ObFTWordCode &code,
-                                             bool &found) const
-{
-  int ret = OB_SUCCESS;
-  found = false;
-  uint32_t cp = 0;
-  const bool cacheable = utf8_bmp_codepoint(ft_char.ptr(), ft_char.length(), cp);
-  std::atomic<int32_t> *cache = cacheable ? code_cache() : nullptr;
-  if (OB_NOT_NULL(cache)) {
-    const int32_t slot = cache[cp].load(std::memory_order_relaxed);
-    if (slot > 0) {
-      code = slot - 1;
-      found = true;
-      return ret;
-    } else if (slot < 0) {
-      return ret;
-    }
-  }
-  ObFTSingleWord word;
-  word.set_word(ft_char.ptr(), ft_char.length());
-  ret = dat_->get_map()->find(word, code);
-  if (OB_SUCCESS == ret) {
-    found = true;
-    if (OB_NOT_NULL(cache)) {
-      cache[cp].store(code + 1, std::memory_order_relaxed);
-    }
-  } else if (OB_ENTRY_NOT_EXIST == ret) {
-    ret = OB_SUCCESS;
-    if (OB_NOT_NULL(cache)) {
-      cache[cp].store(-1, std::memory_order_relaxed);
-    }
-  }
-  return ret;
-}
-
 template <typename DATA_TYPE>
 int ObFTDATReader<DATA_TYPE>::match_with_hit(const ObString &ft_char,
                                              const ObDATrieHit &last_hit,
@@ -338,13 +253,16 @@ int ObFTDATReader<DATA_TYPE>::match_with_hit(const ObString &ft_char,
 {
   int ret = OB_SUCCESS;
   ObFTWordCode code;
-  bool found = false;
   hit.set_unmatch();
+  auto *map = dat_->get_map();
   int32_t *base = reinterpret_cast<int32_t *>(dat_->buff + dat_->base_offset_);
   int32_t *check = reinterpret_cast<int32_t *>(dat_->buff + dat_->check_offset_);
 
-  if (OB_FAIL(find_word_code(ft_char, code, found))) {
-  } else if (!found) {
+  ObFTSingleWord word;
+  word.set_word(ft_char.ptr(), ft_char.length());
+  if (OB_FAIL(dat_->get_map()->find(word, code)) && OB_ENTRY_NOT_EXIST != ret) {
+  } else if (OB_ENTRY_NOT_EXIST == ret) {
+    ret = OB_SUCCESS;
     hit.set_unmatch();
   } else {
     if (&last_hit == &hit) {

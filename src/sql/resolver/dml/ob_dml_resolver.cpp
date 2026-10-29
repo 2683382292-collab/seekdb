@@ -38,6 +38,7 @@
 #include "sql/das/ob_domain_id.h"
 #include "query/vector/ob_vector_index_util.h"
 #include "sql/engine/expr/ob_expr_regexp.h"
+#include "sql/engine/basic/ob_file_scan.h"
 #include "sql/resolver/dcl/ob_dcl_resolver.h"
 #include "sql/resolver/ddl/ob_ddl_resolver.h"
 #include "sql/hybrid_search/ob_hybrid_search_executor.h"
@@ -2724,6 +2725,11 @@ int ObDMLResolver::resolve_table(const ParseNode &parse_tree,
         }
         break;
       }
+      case T_FILE_TABLE_EXPRESSION: {
+        if (OB_FAIL(resolve_file_table_item(*table_node, table_item))) {
+        }
+        break;
+      }
       default:
         /* won't be here */
         ret = OB_ERR_PARSER_SYNTAX;
@@ -3083,7 +3089,7 @@ int ObDMLResolver::resolve_single_table_column_item(const TableItem &table_item,
   } else if (table_item.is_json_table()) {
     if (OB_FAIL(resolve_json_table_column_item(table_item, column_name, col_item))) {
     }
-  } else if (table_item.is_values_table()) {
+  } else if (table_item.is_values_table() || table_item.is_file_table()) {
     if (OB_ISNULL(col_item = stmt->get_column_item(table_item.table_id_, column_name))) {
       ret = OB_ERR_BAD_FIELD_ERROR;
     }
@@ -4030,6 +4036,209 @@ int ObDMLResolver::resolve_function_table_item(const ParseNode &parse_tree,
   }
   OX (tbl_item = item);
   return ret;
+}
+
+static bool sample_size_rejected(const ParseNode *args);
+
+int ObDMLResolver::resolve_file_table_item(const ParseNode &parse_tree, TableItem *&table_item)
+{
+  int ret = OB_SUCCESS;
+  ObDMLStmt *stmt = get_stmt();
+  table_item = NULL;
+  if (OB_ISNULL(stmt) || OB_ISNULL(allocator_) || OB_ISNULL(session_info_) || OB_ISNULL(params_.expr_factory_)) {
+    ret = OB_ERR_UNEXPECTED;
+  } else if (parse_tree.type_ != T_FILE_TABLE_EXPRESSION || parse_tree.num_child_ != 4 ||
+             OB_ISNULL(parse_tree.children_[0]) || OB_ISNULL(parse_tree.children_[1])) {
+    ret = OB_ERR_PARSER_SYNTAX;
+  } else if (sample_size_rejected(parse_tree.children_[2])) {
+    ret = OB_NOT_SUPPORTED;
+    LOG_USER_ERROR(OB_NOT_SUPPORTED, "sample_size other than -1");
+  } else {
+    const int kind = static_cast<int>(parse_tree.children_[0]->value_);
+    ObString path(static_cast<int32_t>(parse_tree.children_[1]->str_len_), parse_tree.children_[1]->str_value_);
+    bool header = true;
+    bool saw_positional = false;
+    ObString format;
+    const ParseNode *args = parse_tree.children_[2];
+    if (NULL != args) {
+      for (int i = 0; OB_SUCC(ret) && i < args->num_child_; ++i) {
+        const ParseNode *arg = args->children_[i];
+        if (OB_ISNULL(arg)) {
+          ret = OB_ERR_UNEXPECTED;
+        } else if (T_FILE_SQL_OPTION != arg->type_) {
+          saw_positional = true;
+        } else if (OB_ISNULL(arg->children_[0])) {
+          ret = OB_ERR_PARSER_SYNTAX;
+        } else {
+          ObString name(static_cast<int32_t>(arg->children_[0]->str_len_), arg->children_[0]->str_value_);
+          const ParseNode *value = arg->children_[1];
+          if (0 == name.case_compare("header")) {
+            if (OB_ISNULL(value)) {
+              header = true;
+            } else if (T_BOOL == value->type_ || T_INT == value->type_) {
+              header = 0 != value->value_;
+            } else {
+              ret = OB_ERR_PARSER_SYNTAX;
+            }
+          } else if (0 == name.case_compare("sample_size")) {
+            // Rejected above when the value is not -1. Presence of -1 is a no-op.
+          } else if (0 == name.case_compare("format")) {
+            if (OB_ISNULL(value) || NULL == value->str_value_) {
+              ret = OB_ERR_PARSER_SYNTAX;
+            } else {
+              format.assign_ptr(value->str_value_, static_cast<int32_t>(value->str_len_));
+            }
+          } else {
+            ret = OB_ERR_PARSER_SYNTAX;
+          }
+        }
+      }
+    }
+    if (OB_SUCC(ret) && saw_positional) {
+      ret = OB_ERR_PARSER_SYNTAX;
+    }
+    if (OB_SUCC(ret) && !format.empty()) {
+      if ((OB_FILE_SQL_JSONL == kind || 5 == kind) && 0 != format.case_compare("newline_delimited")) {
+        ret = OB_NOT_SUPPORTED;
+        LOG_USER_ERROR(OB_NOT_SUPPORTED, "JSON format other than newline_delimited");
+      } else if (OB_FILE_SQL_JSONL != kind && 5 != kind && 0 != format.case_compare("csv")) {
+        ret = OB_NOT_SUPPORTED;
+        LOG_USER_ERROR(OB_NOT_SUPPORTED, "this file format");
+      }
+    }
+    int scan_kind = kind == 5 ? OB_FILE_SQL_JSONL : kind;
+    ObFileTableDef inferred;
+    if (OB_FAIL(ret)) {
+    } else if (OB_FAIL(ObFileScan::infer(session_info_, *allocator_, scan_kind, path, header, -1, inferred))) {
+      LOG_WARN("infer file sql schema failed", K(ret), K(path), K(scan_kind));
+    } else {
+      TableItem *item = NULL;
+      void *buf = NULL;
+      ObFileTableDef *stored = NULL;
+      if (OB_ISNULL(item = stmt->create_table_item(*allocator_))) {
+        ret = OB_ALLOCATE_MEMORY_FAILED;
+      } else if (OB_ISNULL(buf = allocator_->alloc(sizeof(ObFileTableDef)))) {
+        ret = OB_ALLOCATE_MEMORY_FAILED;
+      } else if (FALSE_IT(stored = new (buf) ObFileTableDef())) {
+      } else if (OB_FAIL(stored->deep_copy(inferred, *allocator_))) {
+      } else {
+        const ParseNode *alias = parse_tree.children_[3];
+        item->type_ = TableItem::FILE_TABLE;
+        item->file_table_def_ = stored;
+        item->is_system_table_ = false;
+        item->table_id_ = generate_table_id();
+        item->database_name_ = session_info_->get_database_name();
+        if (NULL != alias && NULL != alias->str_value_ && alias->str_len_ > 0) {
+          ObString alias_name;
+          if (OB_FAIL(ob_write_string(*allocator_,
+                                      ObString(static_cast<int32_t>(alias->str_len_), alias->str_value_),
+                                      alias_name, true))) {
+          } else {
+            item->table_name_ = alias_name;
+            item->alias_name_ = alias_name;
+          }
+        } else {
+          char tmp[64];
+          int n = snprintf(tmp, sizeof(tmp), "%s_%lu", stored->kind_name(), item->table_id_);
+          char *name_buf = NULL;
+          if (n <= 0 || NULL == (name_buf = static_cast<char *>(allocator_->alloc(n)))) {
+            ret = OB_ALLOCATE_MEMORY_FAILED;
+          } else {
+            memcpy(name_buf, tmp, n);
+            item->table_name_.assign_ptr(name_buf, n);
+            item->alias_name_.assign_ptr(name_buf, n);
+          }
+        }
+      }
+      if (OB_SUCC(ret) && OB_FAIL(stmt->add_table_item(session_info_, item))) {
+      }
+      for (int64_t i = 0; OB_SUCC(ret) && i < stored->col_names_.count(); ++i) {
+        ObColumnRefRawExpr *column_expr = NULL;
+        ObRawExprResType result_type;
+        ObObjMeta meta;
+        int kind_id = static_cast<int>(stored->col_kinds_.at(i));
+        if (OB_FAIL(params_.expr_factory_->create_raw_expr(T_REF_COLUMN, column_expr))) {
+        } else if (OB_ISNULL(column_expr)) {
+          ret = OB_ERR_UNEXPECTED;
+        } else {
+          switch (kind_id) {
+            case OB_FILE_COL_BIGINT:
+              meta.set_int();
+              result_type.set_meta(meta);
+              result_type.set_precision(20);
+              result_type.set_scale(0);
+              break;
+            case OB_FILE_COL_DOUBLE:
+              meta.set_double();
+              result_type.set_meta(meta);
+              break;
+            case OB_FILE_COL_BOOL:
+              meta.set_tinyint();
+              result_type.set_meta(meta);
+              result_type.set_precision(1);
+              result_type.set_scale(0);
+              break;
+            case OB_FILE_COL_DATE:
+              meta.set_date();
+              result_type.set_meta(meta);
+              break;
+            case OB_FILE_COL_DATETIME:
+              meta.set_datetime();
+              result_type.set_meta(meta);
+              result_type.set_scale(0);
+              break;
+            default:
+              meta.set_varchar();
+              meta.set_collation_type(CS_TYPE_UTF8MB4_GENERAL_CI);
+              meta.set_collation_level(CS_LEVEL_IMPLICIT);
+              result_type.set_meta(meta);
+              result_type.set_length(65535);
+              break;
+          }
+          if (0 == stored->col_nullable_.at(i)) {
+            result_type.set_result_flag(NOT_NULL_FLAG);
+          }
+          column_expr->set_result_type(result_type);
+          column_expr->set_ref_id(item->table_id_, i + OB_APP_MIN_COLUMN_ID);
+          column_expr->set_column_attr(item->get_table_name(), stored->col_names_.at(i));
+          column_expr->set_database_name(item->database_name_);
+          if (OB_FAIL(column_expr->add_flag(IS_COLUMN))) {
+          } else {
+            ColumnItem column_item;
+            column_item.expr_ = column_expr;
+            column_item.table_id_ = column_expr->get_table_id();
+            column_item.column_id_ = column_expr->get_column_id();
+            column_item.column_name_ = column_expr->get_column_name();
+            if (OB_FAIL(stmt->add_column_item(column_item))) {
+            }
+          }
+        }
+      }
+      if (OB_SUCC(ret)) {
+        table_item = item;
+      }
+    }
+  }
+  return ret;
+}
+
+static bool sample_size_rejected(const ParseNode *args)
+{
+  bool rejected = false;
+  if (NULL != args) {
+    for (int i = 0; i < args->num_child_ && !rejected; ++i) {
+      const ParseNode *arg = args->children_[i];
+      if (NULL != arg && T_FILE_SQL_OPTION == arg->type_ && NULL != arg->children_[0] && NULL != arg->children_[1]) {
+        ObString name(static_cast<int32_t>(arg->children_[0]->str_len_), arg->children_[0]->str_value_);
+        const ParseNode *value = arg->children_[1];
+        if (0 == name.case_compare("sample_size") &&
+            !(T_INT == value->type_ && -1 == value->value_)) {
+          rejected = true;
+        }
+      }
+    }
+  }
+  return rejected;
 }
 
 int ObDMLResolver::resolve_base_or_alias_table_item_normal(const uint64_t database_id,
@@ -8371,6 +8580,14 @@ int ObDMLResolver::get_columns_from_table_item(const TableItem *table_item, ObIA
     OZ (ObResolverUtils::get_all_function_table_column_names(*table_item,
                                                              params_,
                                                              column_names));
+  } else if (table_item->is_file_table()) {
+    ObArray<ColumnItem> file_cols;
+    if (OB_FAIL(get_stmt()->get_column_items(table_item->table_id_, file_cols))) {
+    }
+    for (int64_t i = 0; OB_SUCC(ret) && i < file_cols.count(); ++i) {
+      if (OB_FAIL(column_names.push_back(file_cols.at(i).column_name_))) {
+      }
+    }
   } else if (table_item->is_basic_table() || table_item->is_fake_cte_table()) {
     /**
      * LINK_TABLE and CTE_TABLE is same as BASIC_TABLE or ALIAS_TABLE

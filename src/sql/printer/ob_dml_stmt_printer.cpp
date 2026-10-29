@@ -22,6 +22,7 @@
 #include "lib/utility/ob_smart_call.h"
 #include "lib/charset/ob_charset.h"
 #include "sql/optimizer/ob_log_plan.h"
+#include "sql/engine/basic/ob_file_scan.h"
 #include "sql/monitor/ob_sql_plan.h"
 namespace oceanbase
 {
@@ -358,6 +359,20 @@ int ObDMLStmtPrinter::print_table(const TableItem *table_item,
     }
     case TableItem::VALUES_TABLE: {
       if (OB_FAIL(print_values_table(*table_item, no_print_alias))) {
+      }
+      break;
+    }
+    case TableItem::FILE_TABLE: {
+      if (OB_ISNULL(table_item->file_table_def_)) {
+        ret = OB_ERR_UNEXPECTED;
+      } else {
+        DATA_PRINTF("%s(", table_item->file_table_def_->kind_name());
+        DATA_PRINTF("'%.*s'", LEN_AND_PTR(table_item->file_table_def_->path_));
+        DATA_PRINTF(")");
+        if (!table_item->alias_name_.empty()) {
+          DATA_PRINTF(" ");
+          PRINT_IDENT_WITH_QUOT(table_item->alias_name_);
+        }
       }
       break;
     }

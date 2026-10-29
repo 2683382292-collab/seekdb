@@ -38,7 +38,7 @@ OB_SERIALIZE_MEMBER(ObSelectIntoOpInput, task_id_, sqc_id_);
 OB_SERIALIZE_MEMBER((ObSelectIntoSpec, ObOpSpec), into_type_, user_vars_, outfile_name_,
     field_str_, line_str_, closed_cht_, is_optional_, select_exprs_, is_single_, max_file_size_,
     escaped_cht_, cs_type_, parallel_, buffer_size_, is_overwrite_,
-    external_properties_);
+    external_properties_, file_sql_copy_, file_sql_header_, file_sql_nullstr_, file_sql_headers_);
 
 
 int ObSelectIntoOp::inner_open()
@@ -326,6 +326,9 @@ int ObSelectIntoOp::inner_close()
 {
   int ret = OB_SUCCESS;
   if (OB_NOT_NULL(data_writer_) && OB_FAIL(data_writer_->close_data_writer())) {
+  }
+  if (MY_SPEC.file_sql_copy_ && !need_commit_ && !basic_url_.empty() && NULL != basic_url_.ptr()) {
+    ::unlink(basic_url_.ptr());
   }
   return ret;
 }
@@ -929,7 +932,12 @@ int ObSelectIntoOp::print_field(const ObObj &obj, ObCsvFileWriter &data_writer)
   if (need_enclose) {
     OZ(write_single_char_to_file(&char_enclose_, data_writer));
   }
-  if (!has_escape_) {
+  if (obj.is_null() && MY_SPEC.file_sql_copy_) {
+    ObObj null_text;
+    null_text.set_varchar(MY_SPEC.file_sql_nullstr_);
+    null_text.set_collation_type(CS_TYPE_UTF8MB4_BIN);
+    OZ(write_obj_to_file(null_text, data_writer, false));
+  } else if (!has_escape_) {
     OZ(write_obj_to_file(obj, data_writer, false));
   } else if (obj.is_null()) {
     OZ(write_single_char_to_file(&char_escape_, data_writer));
@@ -1239,11 +1247,31 @@ int ObSelectIntoOp::create_the_only_data_writer(ObExternalFileWriter *&data_writ
     data_writer_ = data_writer;
   }
   if (OB_FAIL(ret)) {
+  } else if (MY_SPEC.file_sql_copy_ && NULL != data_writer->url_.ptr() &&
+             0 == ::access(data_writer->url_.ptr(), F_OK)) {
+    ret = OB_FILE_ALREADY_EXIST;
+    LOG_WARN("COPY target already exists", K(ret), K(data_writer->url_));
   } else if (T_INTO_OUTFILE == MY_SPEC.into_type_ && MY_SPEC.is_single_
              && OB_FAIL(data_writer->open_file())) {
   } else if (ObExternalFileFormat::FormatType::CSV_FORMAT == format_type_ && MY_SPEC.buffer_size_ > 0) {
     csv_data_writer = static_cast<ObCsvFileWriter*>(data_writer);
     if (OB_FAIL(csv_data_writer->alloc_buf(ctx_.get_allocator(), MY_SPEC.buffer_size_))) {
+    }
+  }
+  if (OB_SUCC(ret) && MY_SPEC.file_sql_copy_ && MY_SPEC.file_sql_header_ && !file_sql_header_written_) {
+    ObCsvFileWriter *csv_writer = static_cast<ObCsvFileWriter *>(data_writer);
+    file_sql_header_written_ = true;
+    for (int64_t i = 0; OB_SUCC(ret) && i < MY_SPEC.file_sql_headers_.count(); ++i) {
+      ObObj name;
+      name.set_varchar(MY_SPEC.file_sql_headers_.at(i));
+      name.set_collation_type(CS_TYPE_UTF8MB4_BIN);
+      if (OB_FAIL(print_field(name, *csv_writer))) {
+      } else if (i + 1 != MY_SPEC.file_sql_headers_.count() &&
+                 OB_FAIL(write_obj_to_file(field_str_, *csv_writer))) {
+      }
+    }
+    if (OB_SUCC(ret)) {
+      ret = write_obj_to_file(line_str_, *csv_writer);
     }
   }
   return ret;

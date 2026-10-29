@@ -16,6 +16,10 @@
 
 #define USING_LOG_PREFIX SQL_RESV
 #include "sql/resolver/ob_resolver.h"
+#include "sql/parser/ob_parser.h"
+#include "sql/resolver/dml/ob_select_stmt.h"
+#include "sql/resolver/dml/ob_select_resolver.h"
+#include "lib/string/ob_sql_string.h"
 #include "lib/utility/ob_smart_call.h"
 #include "lib/stat/ob_diagnostic_info_guard.h"
 #include "sql/resolver/cmd/ob_alter_system_resolver.h"
@@ -101,6 +105,40 @@ using namespace common;
 using namespace share;
 namespace sql
 {
+static const char *file_sql_describe_type(const ObRawExprResType &type)
+{
+  if (ObTinyIntType == type.get_type() && 1 == type.get_precision()) {
+    return "BOOLEAN";
+  }
+  switch (type.get_type()) {
+    case ObIntType: return "BIGINT";
+    case ObDoubleType: return "DOUBLE";
+    case ObDateType: return "DATE";
+    case ObDateTimeType: return "DATETIME";
+    case ObVarcharType: return "VARCHAR";
+    default: return "VARCHAR";
+  }
+}
+
+static int append_describe_literal(ObSqlString &sql, const ObString &text)
+{
+  int ret = OB_SUCCESS;
+  if (OB_FAIL(sql.append("'"))) {
+  }
+  for (int64_t i = 0; OB_SUCC(ret) && i < text.length(); ++i) {
+    char c = text.ptr()[i];
+    if ('\'' == c) {
+      if (OB_FAIL(sql.append("''"))) {
+      }
+    } else if (OB_FAIL(sql.append(&c, 1))) {
+    }
+  }
+  if (OB_SUCC(ret)) {
+    ret = sql.append("'");
+  }
+  return ret;
+}
+
 ObResolver::ObResolver(ObResolverParams &params)
     : params_(params)
 {
@@ -236,6 +274,60 @@ int ObResolver::resolve(IsPrepared if_prepared, const ParseNode &parse_tree, ObS
       }
       case T_SELECT: {
         REGISTER_SELECT_STMT_RESOLVER(Select);
+        break;
+      }
+      case T_DESCRIBE_QUERY: {
+        ObStmt *inner = NULL;
+        if (1 != parse_tree.num_child_ || OB_ISNULL(parse_tree.children_) || OB_ISNULL(parse_tree.children_[0])) {
+          ret = OB_ERR_PARSER_SYNTAX;
+        } else if (OB_FAIL(select_stmt_resolver_func<ObSelectResolver>(params_, *parse_tree.children_[0], inner))) {
+        } else if (OB_ISNULL(inner) || !inner->is_select_stmt()) {
+          ret = OB_ERR_UNEXPECTED;
+        } else {
+          ObSelectStmt *select_stmt = static_cast<ObSelectStmt *>(inner);
+          ObSqlString sql;
+          if (select_stmt->get_select_item_size() <= 0) {
+            ret = OB_ERR_UNEXPECTED;
+          }
+          for (int64_t i = 0; OB_SUCC(ret) && i < select_stmt->get_select_item_size(); ++i) {
+            const SelectItem &item = select_stmt->get_select_item(i);
+            ObString name = item.alias_name_.empty() ? item.expr_name_ : item.alias_name_;
+            const ObRawExpr *expr = item.expr_;
+            if (OB_ISNULL(expr)) {
+              ret = OB_ERR_UNEXPECTED;
+            } else if (0 == i) {
+              if (OB_FAIL(sql.append("SELECT "))) {
+              } else if (OB_FAIL(append_describe_literal(sql, name))) {
+              } else if (OB_FAIL(sql.append(" AS `column_name`, "))) {
+              } else if (OB_FAIL(append_describe_literal(sql, ObString(file_sql_describe_type(expr->get_result_type()))))) {
+              } else if (OB_FAIL(sql.append(" AS `column_type`, "))) {
+              } else if (OB_FAIL(sql.append(expr->get_result_type().has_result_flag(NOT_NULL_FLAG) ? "'NO'" : "'YES'"))) {
+              } else if (OB_FAIL(sql.append(" AS `null`, NULL AS `key`, NULL AS `default`, NULL AS `extra`"))) {
+              }
+            } else if (OB_FAIL(sql.append(" UNION ALL SELECT "))) {
+            } else if (OB_FAIL(append_describe_literal(sql, name))) {
+            } else if (OB_FAIL(sql.append(", "))) {
+            } else if (OB_FAIL(append_describe_literal(sql, ObString(file_sql_describe_type(expr->get_result_type()))))) {
+            } else if (OB_FAIL(sql.append(", "))) {
+            } else if (OB_FAIL(sql.append(expr->get_result_type().has_result_flag(NOT_NULL_FLAG) ? "'NO'" : "'YES'"))) {
+            } else if (OB_FAIL(sql.append(", NULL, NULL, NULL"))) {
+            }
+          }
+          ParseResult parse_result;
+          memset(&parse_result, 0, sizeof(parse_result));
+          ObParser parser(*params_.allocator_, params_.session_info_->get_sql_mode(),
+                          params_.session_info_->get_charsets4parser());
+          if (OB_FAIL(ret)) {
+          } else if (OB_FAIL(parser.parse(sql.string(), parse_result))) {
+            LOG_WARN("parse describe query failed", K(ret), K(sql));
+          } else if (OB_ISNULL(parse_result.result_tree_) || parse_result.result_tree_->num_child_ < 1 ||
+                     OB_ISNULL(parse_result.result_tree_->children_[0])) {
+            ret = OB_ERR_UNEXPECTED;
+          } else if (OB_FAIL(select_stmt_resolver_func<ObSelectResolver>(
+                         params_, *parse_result.result_tree_->children_[0], stmt))) {
+          }
+          parser.free_result(parse_result);
+        }
         break;
       }
       case T_INSERT: {

@@ -16,6 +16,7 @@
 
 #define USING_LOG_PREFIX SQL_RESV
 #include "ob_dml_stmt.h"
+#include "sql/engine/basic/ob_file_scan.h"
 #include "sql/rewrite/ob_transform_utils.h"
 #include "sql/optimizer/ob_logical_operator.h"
 using namespace oceanbase::sql;
@@ -194,6 +195,20 @@ int TableItem::deep_copy(ObIRawExprCopier &expr_copier,
   } else if (OB_FAIL(part_names_.assign(other.part_names_))) {
   } else if (is_values_table() &&
              OB_FAIL(deep_copy_values_table_def(*other.values_table_def_, expr_copier, allocator))) {
+  } else if (is_file_table()) {
+    if (OB_ISNULL(allocator) || OB_ISNULL(other.file_table_def_)) {
+      ret = OB_ERR_UNEXPECTED;
+    } else {
+      ObFileTableDef *copied = NULL;
+      void *buf = allocator->alloc(sizeof(ObFileTableDef));
+      if (OB_ISNULL(buf)) {
+        ret = OB_ALLOCATE_MEMORY_FAILED;
+      } else if (FALSE_IT(copied = new (buf) ObFileTableDef())) {
+      } else if (OB_FAIL(copied->deep_copy(*other.file_table_def_, *allocator))) {
+      } else {
+        file_table_def_ = copied;
+      }
+    }
   } else { /* do nothing */ }
   if (OB_SUCC(ret)) {
     if (OB_ISNULL(other.sample_info_)) {
@@ -1558,7 +1573,8 @@ int ObDMLStmt::formalize_stmt_expr_reference(ObRawExprFactory *expr_factory,
       } else if (table_item->is_function_table() ||
                  table_item->is_json_table() ||
                  table_item->for_update_ ||
-                 table_item->is_values_table()) {
+                 table_item->is_values_table() ||
+                 table_item->is_file_table()) {
         if (OB_FAIL(set_sharable_expr_reference(*column_item.expr_, ExplicitedRefType::REF_BY_NORMAL))) {
         } else if (table_item->is_json_table()) {
           if (NULL != column_item.default_value_expr_ 

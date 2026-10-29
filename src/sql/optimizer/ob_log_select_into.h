@@ -44,7 +44,11 @@ public:
         escaped_cht_(),
         cs_type_(CS_TYPE_INVALID),
         is_overwrite_(false),
-        external_properties_()
+        external_properties_(),
+        file_sql_copy_(false),
+        file_sql_header_(false),
+        file_sql_nullstr_(),
+        file_sql_headers_()
   {
   }
   virtual ~ObLogSelectInto() {}
@@ -108,6 +112,14 @@ public:
   {
     external_properties_.assign_ptr(external_properties.ptr(), external_properties.length());
   }
+  inline void set_file_sql_copy(bool value) { file_sql_copy_ = value; }
+  inline void set_file_sql_header(bool value) { file_sql_header_ = value; }
+  inline void set_file_sql_nullstr(const common::ObString &value) { file_sql_nullstr_ = value; }
+  inline int add_file_sql_header(const common::ObString &value) { return file_sql_headers_.push_back(value); }
+  inline bool get_file_sql_copy() const { return file_sql_copy_; }
+  inline bool get_file_sql_header() const { return file_sql_header_; }
+  inline const common::ObString &get_file_sql_nullstr() const { return file_sql_nullstr_; }
+  inline const common::ObIArray<common::ObString> &get_file_sql_headers() const { return file_sql_headers_; }
   inline ObItemType get_into_type() const
   {
     return into_type_;
@@ -188,6 +200,10 @@ private:
   common::ObCollationType cs_type_;
   bool is_overwrite_;
   common::ObString external_properties_;
+  bool file_sql_copy_;
+  bool file_sql_header_;
+  common::ObString file_sql_nullstr_;
+  common::ObSEArray<common::ObString, 4, common::ModulePageAllocator, true> file_sql_headers_;
 };
 }
 }

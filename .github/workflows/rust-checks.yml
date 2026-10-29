@@ -65,7 +65,7 @@ jobs:
       - name: Prepare generated Rust configuration
         run: |
           ./build.py init
-          ./build.py build //rust/config:generated_config.rs
+          ./build.py build --lockfile_mode=error //rust/config:generated_config.rs
           echo "CONFIG_RS=$PWD/build/bin/rust/config/generated_config.rs" >> "$GITHUB_ENV"
 
       - name: clippy (deny warnings)

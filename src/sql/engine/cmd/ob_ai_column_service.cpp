@@ -27,6 +27,7 @@
 #include "lib/allocator/page_arena.h"
 #include "lib/allocator/ob_malloc.h"
 #include "lib/charset/ob_charset.h"
+#include "common/json_type/ob_json_parse.h"
 #include "lib/lock/ob_spin_lock.h"
 #include "lib/thread/thread_pool.h"
 #include "lib/time/ob_time_utility.h"
@@ -90,6 +91,7 @@ struct Meta
   int64_t max_retries;
   int kind;
   int result_type;
+  int64_t vector_dim;
   bool persisted;
   bool not_ready;
 };
@@ -104,6 +106,7 @@ struct Staged
   int64_t max_retries;
   int kind;
   int result_type;
+  int64_t vector_dim;
   bool used;
 };
 
@@ -630,6 +633,7 @@ int user_query(ObSQLSessionInfo *session, const char *sql, bool &has_row)
 }
 
 void ensure_worker();
+void bootstrap_recovery();
 
 int insert_metadata(const Meta &meta)
 {
@@ -685,6 +689,92 @@ int insert_metadata(const Meta &meta)
   } else if (OB_FAIL(quote_literal(sql, meta.type_prompt, static_cast<int>(strlen(meta.type_prompt))))) {
   } else if (OB_FAIL(sql.append(", now(6), now(6))", -1))) {
   } else if (OB_FAIL(proxy_write(sql.data, affected))) {
+  }
+  return ret;
+}
+
+int read_text(common::sqlclient::ObMySQLResult *rows, const char *column, char *dst, int dst_len)
+{
+  int ret = OB_SUCCESS;
+  common::ObString text;
+  if (OB_ISNULL(rows) || OB_ISNULL(column) || OB_ISNULL(dst)) {
+    ret = OB_INVALID_ARGUMENT;
+  } else if (OB_FAIL(rows->get_varchar(column, text))) {
+    if (OB_ERR_NULL_VALUE == ret) {
+      dst[0] = '\0';
+      ret = OB_SUCCESS;
+    }
+  } else {
+    copy_text(dst, dst_len, text.ptr(), text.length());
+  }
+  return ret;
+}
+
+int load_persisted_metadata()
+{
+  int ret = OB_SUCCESS;
+  SqlBuf sql;
+  int loaded = 0;
+  if (OB_FAIL(sql.append("SELECT table_id, column_id, state_column_id, request_column_id, "
+                         "result_spec_column_id, column_name, max_retries, normalized_expr, "
+                         "model_name, expr_text, dep_columns, kind, result_type, database_name, "
+                         "table_name, state_column_name, request_column_name, type_prompt "
+                         "FROM oceanbase.__all_ai_column", -1))) {
+  } else {
+    SMART_VAR(common::ObMySQLProxy::MySQLResult, result) {
+      common::sqlclient::ObMySQLResult *rows = nullptr;
+      if (OB_FAIL(proxy_read(sql.data, result))) {
+      } else if (OB_ISNULL(rows = result.get_result())) {
+        ret = OB_ERR_UNEXPECTED;
+      }
+      while (OB_SUCC(ret) && loaded < MAX_META && OB_SUCC(rows->next())) {
+        Meta meta;
+        memset(&meta, 0, sizeof(meta));
+        int64_t table_id = 0;
+        int64_t column_id = 0;
+        int64_t state_id = 0;
+        int64_t request_id = 0;
+        int64_t spec_id = 0;
+        if (OB_FAIL(rows->get_int("table_id", table_id))) {
+        } else if (OB_FAIL(rows->get_int("column_id", column_id))) {
+        } else if (OB_FAIL(rows->get_int("state_column_id", state_id))) {
+        } else if (OB_FAIL(rows->get_int("request_column_id", request_id))) {
+        } else if (OB_FAIL(rows->get_int("result_spec_column_id", spec_id))) {
+        } else if (OB_FAIL(rows->get_int("max_retries", meta.max_retries))) {
+        } else if (OB_FAIL(rows->get_int("kind", meta.kind))) {
+        } else if (OB_FAIL(rows->get_int("result_type", meta.result_type))) {
+        } else if (OB_FAIL(read_text(rows, "column_name", meta.column_name, NAME_LEN))) {
+        } else if (OB_FAIL(read_text(rows, "model_name", meta.model_name, NAME_LEN))) {
+        } else if (OB_FAIL(read_text(rows, "expr_text", meta.expr_sql, EXPR_LEN))) {
+        } else if (OB_FAIL(read_text(rows, "dep_columns", meta.dep_columns, DEP_LEN))) {
+        } else if (OB_FAIL(read_text(rows, "database_name", meta.database_name, NAME_LEN))) {
+        } else if (OB_FAIL(read_text(rows, "table_name", meta.table_name, NAME_LEN))) {
+        } else if (OB_FAIL(read_text(rows, "state_column_name", meta.state_column_name, NAME_LEN))) {
+        } else if (OB_FAIL(read_text(rows, "request_column_name", meta.request_column_name, NAME_LEN))) {
+        } else if (OB_FAIL(read_text(rows, "type_prompt", meta.type_prompt, PROMPT_LEN))) {
+        } else if (OB_FAIL(read_text(rows, "normalized_expr", meta.normalized_expr, EXPR_LEN))) {
+        } else {
+          meta.table_id = static_cast<uint64_t>(table_id);
+          meta.column_id = static_cast<uint64_t>(column_id);
+          meta.state_column_id = static_cast<uint64_t>(state_id);
+          meta.request_column_id = static_cast<uint64_t>(request_id);
+          meta.spec_column_id = static_cast<uint64_t>(spec_id);
+          // The in-flight task rows are still in the system table, so the column
+          // starts out not ready and publishes as soon as they drain.
+          meta.persisted = true;
+          meta.not_ready = true;
+          LockGuard lock(g_lock);
+          if (upsert_meta_locked(meta) == nullptr) {
+            ret = OB_SIZE_OVERFLOW;
+          } else {
+            ++loaded;
+          }
+        }
+      }
+      if (OB_ITER_END == ret) {
+        ret = OB_SUCCESS;
+      }
+    }
   }
   return ret;
 }
@@ -1050,6 +1140,53 @@ int eval_input(const Meta &meta, const char *predicate, char *output, int output
   return ret;
 }
 
+int check_result_shape(const Meta &meta, const char *result)
+{
+  int ret = OB_SUCCESS;
+  if (OB_ISNULL(result) || result[0] == '\0') {
+    ret = OB_INVALID_DATA;
+  } else if (KIND_EMBED == meta.kind) {
+    if (result[0] != '[' || result[strlen(result) - 1] != ']') {
+      ret = OB_INVALID_DATA;
+    } else if (meta.vector_dim > 0) {
+      int64_t count = 0;
+      for (const char *p = result; OB_SUCC(ret) && *p != '\0'; ++p) {
+        if (*p == ',') {
+          ++count;
+        }
+      }
+      if (count + 1 != meta.vector_dim) {
+        ret = OB_ERR_INVALID_VECTOR_DIM;
+        LOG_USER_ERROR(OB_ERR_INVALID_VECTOR_DIM, static_cast<uint32_t>(meta.vector_dim),
+                       static_cast<uint32_t>(count + 1));
+      }
+    }
+  } else if (ob_is_integer_type(static_cast<common::ObObjType>(meta.result_type))) {
+    const char *p = result;
+    if (*p == '-' || *p == '+') {
+      ++p;
+    }
+    if (*p == '\0') {
+      ret = OB_INVALID_DATA;
+    }
+    for (; OB_SUCC(ret) && *p != '\0'; ++p) {
+      if (*p < '0' || *p > '9') {
+        ret = OB_INVALID_DATA;
+      }
+    }
+  } else if (common::ObJsonType == static_cast<common::ObObjType>(meta.result_type)) {
+    common::ObArenaAllocator allocator;
+    common::ObJsonNode *tree = nullptr;
+    if (OB_FAIL(common::ObJsonParser::get_tree(&allocator,
+                                               common::ObString(static_cast<int32_t>(strlen(result)), result),
+                                               tree,
+                                               common::ObJsonParser::JSN_RELAXED_FLAG))) {
+      ret = OB_INVALID_DATA;
+    }
+  }
+  return ret;
+}
+
 int call_model(const Meta &meta, const char *input, char *output, int output_len)
 {
   int ret = OB_SUCCESS;
@@ -1116,6 +1253,10 @@ int call_model(const Meta &meta, const char *input, char *output, int output_len
       }
     } else {
       copy_text(output, output_len, result.ptr(), result.length());
+    }
+    if (OB_SUCC(ret) && OB_FAIL(check_result_shape(meta, output))) {
+      LOG_WARN("ai column result does not match column type", K(ret), K(meta.column_name),
+               K(meta.result_type), K(output));
     }
   }
   return ret;
@@ -1432,14 +1573,44 @@ void ensure_worker()
   }
 }
 
+void bootstrap_recovery()
+{
+  static bool recovered = false;
+  if (!recovered) {
+    int ret = OB_SUCCESS;
+    if (OB_FAIL(load_persisted_metadata())) {
+      LOG_WARN("reload ai column metadata failed", K(ret));
+    } else {
+      recovered = true;
+      ensure_worker();
+    }
+  }
+}
+
 } // namespace
 
 bool ob_table_has_ai_column(const uint64_t table_id)
 {
+  if (OB_INVALID_ID == table_id || 0 == table_id) {
+    return false;
+  }
   bool found = false;
-  LockGuard lock(g_lock);
-  for (int i = 0; !found && i < g_meta_count; ++i) {
-    found = g_metas[i].table_id == table_id && table_id != 0;
+  bool empty = false;
+  {
+    LockGuard lock(g_lock);
+    for (int i = 0; !found && i < g_meta_count; ++i) {
+      found = g_metas[i].table_id == table_id;
+    }
+    empty = (g_meta_count == 0);
+  }
+  if (!found && empty) {
+    // After a restart the registry is cold but the metadata and any in-flight
+    // tasks are still in the system tables, so reload before deciding.
+    bootstrap_recovery();
+    LockGuard lock(g_lock);
+    for (int i = 0; !found && i < g_meta_count; ++i) {
+      found = g_metas[i].table_id == table_id;
+    }
   }
   return found;
 }
@@ -1448,6 +1619,17 @@ void ObAIColumnService::clear_staged()
 {
   g_staged_count = 0;
   memset(g_staged, 0, sizeof(g_staged));
+}
+
+int ObAIColumnService::reject_staged()
+{
+  int ret = OB_SUCCESS;
+  if (g_staged_count > 0) {
+    clear_staged();
+    ret = OB_NOT_SUPPORTED;
+    LOG_USER_ERROR(OB_NOT_SUPPORTED, "modifying an AI column in place");
+  }
+  return ret;
 }
 
 int ObAIColumnService::stage_column(const share::schema::ObColumnSchemaV2 &column, ParseNode *attr)
@@ -1506,7 +1688,12 @@ int ObAIColumnService::stage_column(const share::schema::ObColumnSchemaV2 &colum
         if (expected > 0 && got != expected) {
           ret = OB_ERR_INVALID_VECTOR_DIM;
           LOG_USER_ERROR(OB_ERR_INVALID_VECTOR_DIM, static_cast<uint32_t>(expected), static_cast<uint32_t>(got));
+        } else {
+          staged.vector_dim = got;
         }
+      }
+      if (OB_SUCC(ret) && staged.kind == KIND_EMBED && staged.vector_dim == 0) {
+        staged.vector_dim = vector_dim(column);
       }
     }
     if (OB_SUCC(ret)) {
@@ -1574,6 +1761,7 @@ int materialize_staged(share::schema::ObTableSchema *schema,
     meta.max_retries = staged.max_retries;
     meta.kind = staged.kind;
     meta.result_type = staged.result_type;
+    meta.vector_dim = staged.vector_dim;
     meta.table_id = table_id;
     if (OB_FAIL(fill_hidden(meta, schema, stmt, next_column_id))) {
     } else {
@@ -1657,6 +1845,7 @@ int ObAIColumnService::on_after_dml(ObTableModifyOp *op, ObDMLModifyRowsList *ro
 {
   int ret = OB_SUCCESS;
   if (g_internal_depth > 0 || OB_ISNULL(op) || OB_ISNULL(rows) || rows->size() <= 0) {
+  } else if (FALSE_IT(bootstrap_recovery())) {
   } else {
     ++g_internal_depth;
     ObSQLSessionInfo *session = op->get_exec_ctx().get_my_session();
@@ -1969,6 +2158,8 @@ int ObAIColumnService::strict_enabled(ObSQLSessionInfo *session, bool &enabled)
       && OB_FAIL(session->get_sys_variable(share::SYS_VAR_AI_COLUMN_STRICT_READ, enabled))) {
     enabled = false;
     ret = OB_SUCCESS;
+  } else if (enabled) {
+    bootstrap_recovery();
   }
   return ret;
 }

@@ -3496,6 +3496,8 @@ int ObAlterTableResolver::resolve_add_column(const ParseNode &node, ObColumnName
               *alter_table_stmt, database_name_, table_name_, table_schema_->get_table_id()))) {
         SQL_RESV_LOG(WARN, "add ai hidden columns failed", K(ret));
       }
+    } else {
+      ObAIColumnService::clear_staged();
     }
     add_column_cnt_++;
   }
@@ -3870,6 +3872,7 @@ int ObAlterTableResolver::check_alter_part_key_allowed(const ObTableSchema &tabl
 int ObAlterTableResolver::resolve_change_column(const ParseNode &node)
 {
   int ret = OB_SUCCESS;
+  ObAIColumnService::clear_staged();
   if (T_COLUMN_CHANGE != node.type_ || OB_ISNULL(node.children_) ||
       OB_ISNULL(node.children_[0]) || OB_ISNULL(node.children_[1]) ||
       T_COLUMN_DEFINITION != node.children_[1]->type_) {
@@ -3994,6 +3997,9 @@ int ObAlterTableResolver::check_modify_column_allowed(
                                               false /* is_drop_column */))) {
       }
     }
+    if (OB_SUCC(ret) && OB_FAIL(ObAIColumnService::reject_staged())) {
+      SQL_RESV_LOG(WARN, "change ai column not supported", K(ret));
+    }
   }
   return ret;
 }
@@ -4029,6 +4035,7 @@ int ObAlterTableResolver::resolve_modify_column(const ParseNode &node,
                                                 ObReducedVisibleColSet &reduced_visible_col_set)
 {
   int ret = OB_SUCCESS;
+  ObAIColumnService::clear_staged();
   if (T_COLUMN_MODIFY != node.type_ ||
       OB_ISNULL(node.children_) ||
       OB_ISNULL(node.children_[0]) ||
@@ -4154,6 +4161,9 @@ int ObAlterTableResolver::resolve_modify_column(const ParseNode &node,
         if (OB_FAIL(reduced_visible_col_set.set_refactored(col_key))) {
         }
       }
+    }
+    if (OB_SUCC(ret) && OB_FAIL(ObAIColumnService::reject_staged())) {
+      SQL_RESV_LOG(WARN, "modify ai column not supported", K(ret));
     }
   }
   return ret;

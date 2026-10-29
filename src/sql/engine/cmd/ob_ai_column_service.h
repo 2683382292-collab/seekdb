@@ -49,6 +49,10 @@ class ObAIColumnService
 public:
   static void clear_staged();
   static int stage_column(const share::schema::ObColumnSchemaV2 &column, ParseNode *attr);
+  // MODIFY COLUMN stages an AI definition just like ADD COLUMN, but re-declaring an
+  // AI column in place is not supported, so the staged definition must be discarded
+  // instead of leaking into the next DDL that consumes the staged buffer.
+  static int reject_staged();
   static int append_hidden_columns(share::schema::ObTableSchema &schema,
                                    const common::ObString &database_name,
                                    const common::ObString &table_name,

@@ -938,6 +938,8 @@ int ObCreateTableResolver::resolve_table_elements(const ParseNode *node,
                 table_schema, database_name_, table_name_, cur_column_id_))) {
           SQL_RESV_LOG(WARN, "add ai hidden columns failed", K(ret));
         }
+      } else {
+        ObAIColumnService::clear_staged();
       }
       if (OB_SUCC(ret)) {
         table_schema.set_max_used_column_id(cur_column_id_);

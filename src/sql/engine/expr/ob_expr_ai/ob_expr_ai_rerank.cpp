@@ -128,7 +128,10 @@ static int sort_rerank_result(ObIAllocator &allocator, ObJsonArray *input, const
         items[pos] = key;
       }
       for (int64_t i = 0; OB_SUCC(ret) && i < count; ++i) {
-        if (OB_FAIL(out->append(items[i].obj))) {
+        ObJsonNode *copy = items[i].obj->clone(&allocator, true);
+        if (OB_ISNULL(copy)) {
+          ret = OB_ALLOCATE_MEMORY_FAILED;
+        } else if (OB_FAIL(out->append(copy))) {
         }
       }
     }
@@ -457,7 +460,7 @@ int ObExprAIRerank::sort_document_array_by_model_result(ObIAllocator &allocator,
         } else if (OB_FAIL(json_node_to_double(score_node, score))) {
           LOG_USER_ERROR(OB_INVALID_ARGUMENT, "ai_rerank, result score is invalid");
         } else if (FALSE_IT(score)) {
-        } else if (index < 0 || index >= doc_count || seen[index]) {
+        } else if (index < 0 || index >= doc_count || OB_ISNULL(seen) || seen[index]) {
           ret = OB_INVALID_DATA;
           LOG_USER_ERROR(OB_INVALID_ARGUMENT, "ai_rerank, result index is invalid");
         } else if (OB_ISNULL(score_node)) {
@@ -465,12 +468,15 @@ int ObExprAIRerank::sort_document_array_by_model_result(ObIAllocator &allocator,
         } else {
           seen[index] = true;
           ObJsonNode *origin_node = document_array->get_value(index);
+          ObJsonNode *score_copy = score_node->clone(&allocator, true);
           ObJsonObject *new_obj = nullptr;
           if (OB_ISNULL(origin_node) || origin_node->json_type() != ObJsonNodeType::J_OBJECT) {
             ret = OB_INVALID_DATA;
+          } else if (OB_ISNULL(score_copy)) {
+            ret = OB_ALLOCATE_MEMORY_FAILED;
           } else if (OB_ISNULL(new_obj = static_cast<ObJsonObject *>(static_cast<ObJsonObject *>(origin_node)->clone(&allocator, true)))) {
             ret = OB_ALLOCATE_MEMORY_FAILED;
-          } else if (OB_FAIL(new_obj->add(MODEL_SCORE_KEY, score_node))) {
+          } else if (OB_FAIL(new_obj->add(MODEL_SCORE_KEY, score_copy))) {
           } else if (OB_FAIL(sorted_document_array_obj->append(new_obj))) {
           }
         }
@@ -550,14 +556,16 @@ int ObExprAIRerank::batch_result_add_base(ObIAllocator &allocator, ObJsonArray *
       ObJsonObject *obj = static_cast<ObJsonObject *>(node);
       ObJsonNode *index_node = obj->get_value(index_key);
       int64_t local = 0;
+      ObJsonInt *global_index = nullptr;
       if (OB_FAIL(json_node_to_index(index_node, local))) {
         LOG_USER_ERROR(OB_INVALID_ARGUMENT, "ai_rerank, result index is invalid");
-      } else if (local < 0 || local >= count || seen[local] || index_node->json_type() != ObJsonNodeType::J_INT) {
+      } else if (local < 0 || local >= count || OB_ISNULL(seen) || seen[local]) {
         ret = OB_INVALID_DATA;
         LOG_USER_ERROR(OB_INVALID_ARGUMENT, "ai_rerank, result index is invalid");
+      } else if (OB_FAIL(ObAIFuncJsonUtils::get_json_int(allocator, local + start_idx, global_index))) {
+      } else if (OB_FAIL(obj->add(index_key, global_index))) {
       } else {
         seen[local] = true;
-        static_cast<ObJsonInt *>(index_node)->set_value(local + start_idx);
       }
     }
   }
@@ -591,28 +599,37 @@ int ObExprAIRerank::compact_json_array_by_key(ObIAllocator &allocator, ObJsonArr
         } else if (OB_FAIL(json_node_to_index(static_cast<ObJsonObject *>(obj2)->get_value(INDEX_KEY), index2))) {
         } else {
           const bool take_left = score1 > score2 || (score1 == score2 && index1 <= index2);
-          if (take_left) {
-            if (OB_FAIL(result_array->append(obj1))) {
-            }
+          ObJsonNode *src = take_left ? obj1 : obj2;
+          ObJsonNode *copy = OB_ISNULL(src) ? nullptr : src->clone(&allocator, true);
+          if (OB_ISNULL(copy)) {
+            ret = OB_ALLOCATE_MEMORY_FAILED;
+          } else if (OB_FAIL(result_array->append(copy))) {
+          } else if (take_left) {
             i++;
           } else {
-            if (OB_FAIL(result_array->append(obj2))) {
-            }
             j++;
           }
         }
       }
     }
     if (OB_SUCC(ret)) {
-      while (i < count1) {
-        if (OB_FAIL(result_array->append(array1->get_value(i)))) {
+      while (OB_SUCC(ret) && i < count1) {
+        ObJsonNode *src = array1->get_value(i);
+        ObJsonNode *copy = OB_ISNULL(src) ? nullptr : src->clone(&allocator, true);
+        if (OB_ISNULL(copy)) {
+          ret = OB_ALLOCATE_MEMORY_FAILED;
+        } else if (OB_FAIL(result_array->append(copy))) {
         }
         i++;
       }
     }
     if (OB_SUCC(ret)) {
-      while (j < count2) {
-        if (OB_FAIL(result_array->append(array2->get_value(j)))) {
+      while (OB_SUCC(ret) && j < count2) {
+        ObJsonNode *src = array2->get_value(j);
+        ObJsonNode *copy = OB_ISNULL(src) ? nullptr : src->clone(&allocator, true);
+        if (OB_ISNULL(copy)) {
+          ret = OB_ALLOCATE_MEMORY_FAILED;
+        } else if (OB_FAIL(result_array->append(copy))) {
         }
         j++;
       }

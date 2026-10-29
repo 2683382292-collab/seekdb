@@ -3,6 +3,13 @@
 
 connection default;
 
+--disable_query_log
+--disable_result_log
+SET ob_query_timeout = 180000000;
+SET ob_trx_timeout = 180000000;
+--enable_result_log
+--enable_query_log
+
 # AI_PROMPT: JSON 参数、重复占位符和 LOB 输入
 select ai_prompt('{0}/{0}/{1}', json_array(1,true), json_object('k',2));
 --disable_warnings

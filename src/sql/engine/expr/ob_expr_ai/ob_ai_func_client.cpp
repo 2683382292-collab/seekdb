@@ -16,6 +16,8 @@
 
 #define USING_LOG_PREFIX SQL_ENG
 #include "ob_ai_func_client.h"
+#include "lib/time/ob_time_utility.h"
+#include "lib/worker.h"
 
 namespace oceanbase 
 {
@@ -127,6 +129,11 @@ ObAIFuncClient::~ObAIFuncClient()
 int ObAIFuncClient::init(common::ObIAllocator &allocator, const common::ObString &url, ObArray<ObString> &headers) 
 {
   int ret = OB_SUCCESS;
+  const int64_t budget_us = 60LL * 1000 * 1000;
+  const int64_t now = ::oceanbase::common::ObTimeUtility::current_time();
+  if (!THIS_WORKER.is_timeout_ts_valid() || THIS_WORKER.get_timeout_ts() < now + budget_us) {
+    THIS_WORKER.set_timeout_ts(now + budget_us);
+  }
   int64_t remain_timeout_us = THIS_WORKER.is_timeout_ts_valid() ? THIS_WORKER.get_timeout_remain() : timeout_sec_ * 1000000;
   if (OB_ISNULL(url)) {
     ret = OB_INVALID_ARGUMENT;

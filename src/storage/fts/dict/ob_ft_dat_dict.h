@@ -23,6 +23,7 @@
 #include "ob_ft_dict_def.h"
 #include "storage/fts/dict/ob_ft_dict.h"
 
+#include <atomic>
 #include <cstddef>
 
 /* File Description:
@@ -167,7 +168,8 @@ template <typename DataType = void>
 class ObFTDATReader
 {
 public:
-  ObFTDATReader(ObFTDAT *dat) : dat_(dat) {}
+  ObFTDATReader(ObFTDAT *dat) : dat_(dat), cp_cache_(nullptr) {}
+  ~ObFTDATReader() { delete[] cp_cache_.load(std::memory_order_relaxed); }
 
   // Match single word with hit.
   int match_with_hit(const ObString &single_word,
@@ -175,7 +177,11 @@ public:
                      ObDATrieHit &hit) const;
 
 private:
+  int find_word_code(const ObString &ft_char, ObFTWordCode &code, bool &found) const;
+  std::atomic<int32_t> *code_cache() const;
+
   ObFTDAT *dat_;
+  mutable std::atomic<std::atomic<int32_t> *> cp_cache_;
 
 private:
   DISALLOW_COPY_AND_ASSIGN(ObFTDATReader);

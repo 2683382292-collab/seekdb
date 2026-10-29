@@ -17,6 +17,7 @@
 #define USING_LOG_PREFIX SHARE
 
 #include "share/text_analysis/ob_token_stream.h"
+#include "lib/charset/ob_ctype.h"
 #include "share/rc/ob_server_runtime.h"
 
 namespace oceanbase
@@ -85,6 +86,14 @@ int ObTextWhitespaceTokenizer::inner_open(const ObDatum &document, const ObChars
   return ret;
 }
 
+static bool is_ft_delim_byte(const ObCharsetInfo *cs, unsigned char c)
+{
+  if (OB_ISNULL(cs) || OB_ISNULL(cs->ctype)) {
+    return false;
+  }
+  return ((cs->ctype + 1)[c] & (_MY_SPC | _MY_CTR | _MY_PNT)) != 0;
+}
+
 int ObTextWhitespaceTokenizer::get_next(ObDatum &next_token, int64_t &token_freq)
 {
   int ret = OB_SUCCESS;
@@ -97,8 +106,10 @@ int ObTextWhitespaceTokenizer::get_next(ObDatum &next_token, int64_t &token_freq
     const uint32_t doc_len = get_input_buf_len();
     int64_t token_len = 0;
     // to next non-whitespace pos
-    while (OB_SUCC(ret) && found_delimiter()) {
-      const int64_t c_len = ob_mbcharlen_ptr(cs_, doc + trav_pos_, doc + doc_len);
+    while (OB_SUCC(ret) && trav_pos_ < doc_len
+           && is_ft_delim_byte(cs_, static_cast<unsigned char>(doc[trav_pos_]))) {
+      unsigned char c = static_cast<unsigned char>(doc[trav_pos_]);
+      const int64_t c_len = c < 0x80 ? 1 : ob_mbcharlen_ptr(cs_, doc + trav_pos_, doc + doc_len);
       trav_pos_ += c_len;
       if (trav_pos_ >= doc_len || 0 == c_len) {// if char is invalid, just skip the rest of document
         iter_end_ = true;
@@ -111,8 +122,10 @@ int ObTextWhitespaceTokenizer::get_next(ObDatum &next_token, int64_t &token_freq
     }
 
     // to next whitespace pos
-    while (OB_SUCC(ret) && !found_delimiter()) {
-      const int64_t c_len = ob_mbcharlen_ptr(cs_, doc + trav_pos_, doc + doc_len);
+    while (OB_SUCC(ret) && trav_pos_ < doc_len
+           && !is_ft_delim_byte(cs_, static_cast<unsigned char>(doc[trav_pos_]))) {
+      unsigned char c = static_cast<unsigned char>(doc[trav_pos_]);
+      const int64_t c_len = c < 0x80 ? 1 : ob_mbcharlen_ptr(cs_, doc + trav_pos_, doc + doc_len);
       trav_pos_ += c_len;
       token_len += c_len;
       if (trav_pos_ >= doc_len || 0 == c_len) {
@@ -132,14 +145,6 @@ int ObTextWhitespaceTokenizer::get_next(ObDatum &next_token, int64_t &token_freq
     }
   }
   return ret;
-}
-
-bool ObTextWhitespaceTokenizer::found_delimiter()
-{
-  bool found = false;
-  const char *curr_char = input_doc_->ptr_ + trav_pos_;
-  found = ob_isspace(cs_, *curr_char) || ob_iscntrl(cs_, *curr_char) || ob_ispunct(cs_, *curr_char);
-  return found;
 }
 
 ObTokenNormalizer::ObTokenNormalizer()
@@ -244,7 +249,6 @@ int ObBasicEnglishNormalizer::get_next(ObDatum &next_token, int64_t &token_freq)
   } else {
     next_token.reset();
     token_freq = 0;
-    norm_allocator_.reuse();
     ObDatum tmp_datum;
     bool found_alnum = false;
     uint32_t norm_token_len = 0;
@@ -292,7 +296,30 @@ int ObBasicEnglishNormalizer::get_next(ObDatum &next_token, int64_t &token_freq)
     if (OB_FAIL(ret)) {
     } else if (OB_UNLIKELY(!found_alnum)) {
       ret = OB_ERR_UNEXPECTED;
+    } else if (norm_token_len <= sizeof(ascii_norm_buf_)
+               && OB_NOT_NULL(cs_)
+               && OB_NOT_NULL(cs_->to_lower)) {
+      bool ascii = true;
+      for (uint32_t i = 0; ascii && i < norm_token_len; ++i) {
+        ascii = static_cast<unsigned char>(norm_token_ptr[i]) < 128;
+      }
+      if (ascii) {
+        for (uint32_t i = 0; i < norm_token_len; ++i) {
+          ascii_norm_buf_[i] = static_cast<char>(
+              ob_tolower(cs_, static_cast<unsigned char>(norm_token_ptr[i])));
+        }
+        next_token.set_string(ascii_norm_buf_, norm_token_len);
+      } else {
+        norm_allocator_.reuse();
+        ObString norm_alnum_token(norm_token_len, norm_token_ptr);
+        ObString norm_lower_token;
+        if (OB_FAIL(ObCharset::tolower(cs_, norm_alnum_token, norm_lower_token, norm_allocator_))) {
+        } else {
+          next_token.set_string(norm_lower_token);
+        }
+      }
     } else {
+      norm_allocator_.reuse();
       ObString norm_alnum_token(norm_token_len, norm_token_ptr);
       ObString norm_lower_token;
       if (OB_FAIL(ObCharset::tolower(cs_, norm_alnum_token, norm_lower_token, norm_allocator_))) {

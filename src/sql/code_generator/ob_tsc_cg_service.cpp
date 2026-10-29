@@ -1906,6 +1906,11 @@ int ObTscCgService::generate_text_ir_ctdef(const ObLogTableScan &op,
         partition_row_cnt = est_cost_info->table_meta_info_->table_row_count_ / est_cost_info->table_meta_info_->part_count_;
       }
       ir_scan_ctdef->estimated_total_doc_cnt_ = partition_row_cnt;
+      if (!tr_info.need_calc_relevance_ && 0 == ir_scan_ctdef->estimated_total_doc_cnt_) {
+        // Relevance is unused, so the doc-count aggregate child is not built.
+        // A non-zero estimate skips that iterator. Scoring does not read this value.
+        ir_scan_ctdef->estimated_total_doc_cnt_ = 1;
+      }
       if (tr_info.match_expr_->get_columns_boosts().count() > 0) {
         if (tr_info.column_boost_idx_ < 0 || tr_info.column_boost_idx_ >= tr_info.match_expr_->get_columns_boosts().count()) {
           ret = OB_ERR_UNEXPECTED;

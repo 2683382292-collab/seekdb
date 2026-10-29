@@ -18,6 +18,11 @@
 
 #include "storage/fts/dict/ob_ft_dat_dict.h"
 
+#include <atomic>
+#include <climits>
+#include <cstdlib>
+#include <pthread.h>
+
 #include "lib/utility/alloc_assist.h"
 #include "lib/alloc/alloc_struct.h"
 #include "lib/allocator/ob_allocator.h"
@@ -246,25 +251,151 @@ int ObFTDATBuilder<DATA_TYPE>::encode(const ObString &word, ObFTWordCode &code, 
   return ret;
 }
 
+static bool canonical_utf8_bmp(const char *p, int32_t len, uint32_t &cp)
+{
+  if (nullptr == p || len <= 0 || len > 3) {
+    return false;
+  }
+  const unsigned char c0 = static_cast<unsigned char>(p[0]);
+  if (len == 1) {
+    cp = c0;
+    return c0 < 0x80;
+  } else if (len == 2) {
+    const unsigned char c1 = static_cast<unsigned char>(p[1]);
+    if ((c0 & 0xE0) != 0xC0 || (c1 & 0xC0) != 0x80) {
+      return false;
+    }
+    cp = ((c0 & 0x1F) << 6) | (c1 & 0x3F);
+    return cp >= 0x80 && cp < 0x800;
+  }
+  const unsigned char c1 = static_cast<unsigned char>(p[1]);
+  const unsigned char c2 = static_cast<unsigned char>(p[2]);
+  if ((c0 & 0xF0) != 0xE0 || (c1 & 0xC0) != 0x80 || (c2 & 0xC0) != 0x80) {
+    return false;
+  }
+  cp = ((c0 & 0x0F) << 12) | ((c1 & 0x3F) << 6) | (c2 & 0x3F);
+  return cp >= 0x800 && cp < 0x10000;
+}
+
+namespace {
+
+struct DatCodeCache
+{
+  const void *dat;
+  uint64_t fingerprint;
+  int32_t *slots;
+};
+
+constexpr int MAX_DAT_CODE_CACHES = 64;
+DatCodeCache g_dat_code_caches[MAX_DAT_CODE_CACHES];
+std::atomic<int> g_dat_code_cache_cnt{0};
+pthread_mutex_t g_dat_code_cache_mu = PTHREAD_MUTEX_INITIALIZER;
+
+uint64_t dat_fingerprint(const ObFTDAT *dat)
+{
+  uint64_t fp = static_cast<uint64_t>(dat->mem_block_size_);
+  fp ^= dat->word_num_ * 0x9E3779B185EBCA87ULL;
+  fp ^= dat->node_num_ * 0xC2B2AE3D27D4EB4FULL;
+  fp ^= dat->array_size_ * 0x165667B19E3779F9ULL;
+  return fp;
+}
+
+// One zero-filled table per dictionary block, kept for the process lifetime.
+// Readers are rebuilt for every document, so the table cannot live on the reader.
+// The fingerprint rejects a recycled address that now holds a different block.
+int32_t *shared_code_slots(const ObFTDAT *dat)
+{
+  if (nullptr == dat) {
+    return nullptr;
+  }
+  const uint64_t fp = dat_fingerprint(dat);
+  int n = g_dat_code_cache_cnt.load(std::memory_order_acquire);
+  for (int i = 0; i < n; ++i) {
+    if (g_dat_code_caches[i].dat == dat) {
+      return g_dat_code_caches[i].fingerprint == fp ? g_dat_code_caches[i].slots : nullptr;
+    }
+  }
+  pthread_mutex_lock(&g_dat_code_cache_mu);
+  n = g_dat_code_cache_cnt.load(std::memory_order_relaxed);
+  int32_t *slots = nullptr;
+  int found = -1;
+  for (int i = 0; i < n; ++i) {
+    if (g_dat_code_caches[i].dat == dat) {
+      found = i;
+      break;
+    }
+  }
+  if (found >= 0) {
+    slots = g_dat_code_caches[found].fingerprint == fp ? g_dat_code_caches[found].slots : nullptr;
+  } else if (n >= MAX_DAT_CODE_CACHES) {
+    // Fall back to the hashmap. A miss here only skips the cache.
+  } else if (OB_NOT_NULL(slots = static_cast<int32_t *>(calloc(65536, sizeof(int32_t))))) {
+    g_dat_code_caches[n].slots = slots;
+    g_dat_code_caches[n].fingerprint = fp;
+    g_dat_code_caches[n].dat = dat;
+    g_dat_code_cache_cnt.store(n + 1, std::memory_order_release);
+  }
+  pthread_mutex_unlock(&g_dat_code_cache_mu);
+  return slots;
+}
+
+} // namespace
+
+template <typename DATA_TYPE>
+int32_t *ObFTDATReader<DATA_TYPE>::code_cache() const
+{
+  if (nullptr != code_slots_) {
+    return code_slots_;
+  }
+  int32_t *slots = shared_code_slots(dat_);
+  if (nullptr != slots) {
+    code_slots_ = slots;
+  }
+  return slots;
+}
+
 template <typename DATA_TYPE>
 int ObFTDATReader<DATA_TYPE>::match_with_hit(const ObString &ft_char,
                                              const ObDATrieHit &last_hit,
                                              ObDATrieHit &hit) const
 {
   int ret = OB_SUCCESS;
-  ObFTWordCode code;
+  ObFTWordCode code = 0;
   hit.set_unmatch();
-  auto *map = dat_->get_map();
   int32_t *base = reinterpret_cast<int32_t *>(dat_->buff + dat_->base_offset_);
   int32_t *check = reinterpret_cast<int32_t *>(dat_->buff + dat_->check_offset_);
+  uint32_t cp = 0;
+  int32_t *slots = nullptr;
+  int32_t cached = 0;
+  bool use_cache = canonical_utf8_bmp(ft_char.ptr(), ft_char.length(), cp);
+  if (use_cache) {
+    slots = code_cache();
+    if (nullptr != slots) {
+      cached = __atomic_load_n(slots + cp, __ATOMIC_RELAXED);
+    }
+  }
 
-  ObFTSingleWord word;
-  word.set_word(ft_char.ptr(), ft_char.length());
-  if (OB_FAIL(dat_->get_map()->find(word, code)) && OB_ENTRY_NOT_EXIST != ret) {
-  } else if (OB_ENTRY_NOT_EXIST == ret) {
-    ret = OB_SUCCESS;
-    hit.set_unmatch();
+  if (cached > 0) {
+    code = cached - 1;
+  } else if (cached < 0) {
+    return ret;
   } else {
+    ObFTSingleWord word;
+    word.set_word(ft_char.ptr(), ft_char.length());
+    ret = dat_->get_map()->find(word, code);
+    if (OB_ENTRY_NOT_EXIST == ret) {
+      ret = OB_SUCCESS;
+      if (nullptr != slots && code >= 0) {
+        __atomic_store_n(slots + cp, -1, __ATOMIC_RELAXED);
+      }
+      return ret;
+    } else if (OB_FAIL(ret)) {
+      return ret;
+    } else if (nullptr != slots && code >= 0 && code < INT32_MAX) {
+      __atomic_store_n(slots + cp, code + 1, __ATOMIC_RELAXED);
+    }
+  }
+  {
     if (&last_hit == &hit) {
       // sameone
     } else {

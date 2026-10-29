@@ -167,7 +167,7 @@ template <typename DataType = void>
 class ObFTDATReader
 {
 public:
-  ObFTDATReader(ObFTDAT *dat) : dat_(dat) {}
+  ObFTDATReader(ObFTDAT *dat) : dat_(dat), code_slots_(nullptr) {}
 
   // Match single word with hit.
   int match_with_hit(const ObString &single_word,
@@ -175,7 +175,11 @@ public:
                      ObDATrieHit &hit) const;
 
 private:
+  // Shared across readers of the same DAT. 0 means unseen, positive is code + 1, -1 means absent.
+  int32_t *code_cache() const;
+
   ObFTDAT *dat_;
+  mutable int32_t *code_slots_;
 
 private:
   DISALLOW_COPY_AND_ASSIGN(ObFTDATReader);

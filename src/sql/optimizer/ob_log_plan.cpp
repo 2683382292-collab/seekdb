@@ -12167,6 +12167,74 @@ int ObLogPlan::prepare_text_retrieval_merge(const ObIArray<ObRawExpr *> &merge_m
   return ret;
 }
 
+static bool expr_contains_ptr(const ObRawExpr *expr, const ObRawExpr *target)
+{
+  bool found = false;
+  if (OB_ISNULL(expr) || OB_ISNULL(target)) {
+  } else if (expr == target) {
+    found = true;
+  } else {
+    for (int64_t i = 0; !found && i < expr->get_param_count(); ++i) {
+      found = expr_contains_ptr(expr->get_param_expr(i), target);
+    }
+  }
+  return found;
+}
+
+// WHERE MATCH (...) in natural-language mode keeps every document that contains
+// a query token. BM25 is strictly positive for those documents, so the numeric
+// score does not change the hit set. NOT, OR, boolean mode and column boosts do.
+static bool is_positive_nl_match_filter(const ObRawExpr *expr, const ObRawExpr *match)
+{
+  bool positive = false;
+  if (OB_ISNULL(expr) || OB_ISNULL(match)) {
+  } else if (T_OP_BOOL == expr->get_expr_type()
+             && 1 == expr->get_param_count()
+             && expr->get_param_expr(0) == match) {
+    positive = true;
+  } else if (T_OP_AND == expr->get_expr_type()) {
+    bool saw_match = false;
+    positive = true;
+    for (int64_t i = 0; positive && i < expr->get_param_count(); ++i) {
+      const ObRawExpr *child = expr->get_param_expr(i);
+      if (expr_contains_ptr(child, match)) {
+        saw_match = true;
+        positive = is_positive_nl_match_filter(child, match);
+      }
+    }
+    positive = positive && saw_match;
+  }
+  return positive;
+}
+
+static int match_filter_can_skip_score(const ObDMLStmt *stmt,
+                                       const ObMatchFunRawExpr *match,
+                                       bool &can_skip)
+{
+  int ret = OB_SUCCESS;
+  ObSEArray<ObRawExpr *, 8> relation_exprs;
+  bool saw_match = false;
+  bool all_positive = true;
+  can_skip = false;
+  if (OB_ISNULL(stmt) || OB_ISNULL(match)) {
+    ret = OB_ERR_UNEXPECTED;
+  } else if (match->get_columns_boosts().count() > 0) {
+    // a zero boost can drop a hit that is present in the inverted index
+  } else if (OB_FAIL(stmt->get_relation_exprs(relation_exprs))) {
+    LOG_WARN("failed to get relation exprs", K(ret));
+  } else {
+    for (int64_t i = 0; all_positive && i < relation_exprs.count(); ++i) {
+      const ObRawExpr *expr = relation_exprs.at(i);
+      if (expr_contains_ptr(expr, match)) {
+        saw_match = true;
+        all_positive = is_positive_nl_match_filter(expr, match);
+      }
+    }
+    can_skip = saw_match && all_positive;
+  }
+  return ret;
+}
+
 int ObLogPlan::prepare_text_retrieval_info(const uint64_t ref_table_id,
                                            const uint64_t index_table_id,
                                            ObMatchFunRawExpr *match_against,
@@ -12250,19 +12318,33 @@ int ObLogPlan::prepare_text_retrieval_info(const uint64_t ref_table_id,
       }
     }
   }
-  if (OB_SUCC(ret)) {
-    /*
-    if (OB_FAIL(ObTransformUtils::check_need_calc_match_score(get_optimizer_context().get_exec_ctx(),
-                                                              get_stmt(),
-                                                              match_against,
-                                                              need_calc_relevance,
-                                                              constraints))) {
+  if (OB_SUCC(ret) && NATURAL_LANGUAGE_MODE == match_against->get_mode_flag()) {
+    ObExecContext *exec_ctx = get_optimizer_context().get_exec_ctx();
+    bool score_used = true;
+    bool can_skip = false;
+    if (OB_ISNULL(exec_ctx) || OB_ISNULL(get_stmt()) || OB_ISNULL(get_optimizer_context().get_query_ctx())) {
+      // keep the score; some plan paths have no execution context yet
+    } else if (OB_FAIL(ObTransformUtils::check_need_calc_match_score(exec_ctx,
+                                                                    get_stmt(),
+                                                                    match_against,
+                                                                    score_used,
+                                                                    constraints))) {
       LOG_WARN("failed to check need calc relevance", K(ret));
-    } else if (!need_calc_relevance &&
-               OB_FAIL(append_array_no_dup(get_optimizer_context().get_query_ctx()->all_expr_constraints_, constraints))) {
+    } else if (score_used) {
+      // SELECT/ORDER BY reads the score
+    } else if (OB_FAIL(match_filter_can_skip_score(get_stmt(), match_against, can_skip))) {
+      LOG_WARN("failed to check match filter", K(ret));
+    } else if (!can_skip) {
+      // NOT / OR / comparison still needs the numeric score
+    } else if (!constraints.empty() &&
+               OB_FAIL(append_array_no_dup(get_optimizer_context().get_query_ctx()->all_expr_constraints_,
+                                           constraints))) {
       LOG_WARN("failed to append array no dup", K(ret));
+    } else {
+      need_calc_relevance = false;
     }
-    */
+  }
+  if (OB_SUCC(ret)) {
     tr_info.match_expr_ = match_against;
     tr_info.inv_idx_tid_ = inv_idx_tid;
     tr_info.fwd_idx_tid_ = fwd_idx_tid;

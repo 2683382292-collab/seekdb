@@ -2040,6 +2040,12 @@ private:
                                        ObIArray<ObRawExpr*> &outer_conditions,
                                        ObIArray<TableItem*> &right_tables,
                                        ObIArray<ObSEArray<ObRawExpr*, 4>> &new_outer_conds);
+  // True when some expression reads the numeric MATCH score.
+  static int check_need_calc_match_score(ObExecContext *exec_ctx,
+                                         const ObDMLStmt *stmt,
+                                         ObRawExpr *match_expr,
+                                         bool &need_calc,
+                                         ObIArray<ObExprConstraint> &constraints);
   static int inner_check_need_calc_match_score(ObExecContext *exec_ctx,
                                               ObRawExpr* expr, 
                                               ObRawExpr* match_expr, 

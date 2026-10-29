@@ -431,6 +431,14 @@ int ObOllamaUtils::ObOllamaEmbed::get_body(common::ObIAllocator &allocator,
     if (OB_FAIL(ObAIFuncJsonUtils::get_json_object(allocator, body_obj))) {
     } else if (OB_FAIL(ObAIFuncJsonUtils::get_json_string(allocator, model, model_str))) {
     } else if (OB_FAIL(body_obj->add("model", model_str))) {
+    } else if (contents.count() == 1) {
+      // Native /api/embed takes one string. An array is only used for several inputs.
+      ObJsonString *input_str = nullptr;
+      if (OB_FAIL(ObAIFuncJsonUtils::get_json_string(allocator, contents.at(0), input_str))) {
+      } else if (OB_FAIL(body_obj->add("input", input_str))) {
+      } else {
+        body = body_obj;
+      }
     } else if (OB_FAIL(ObAIFuncJsonUtils::transform_array_to_json_array(allocator, contents, input_array))) {
     } else if (OB_FAIL(body_obj->add("input", input_array))) {
     } else {

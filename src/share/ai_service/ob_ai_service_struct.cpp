@@ -175,6 +175,11 @@ int ObAiModelEndpointInfo::merge_delta_endpoint(common::ObArenaAllocator &alloca
   }
 
   if (OB_SUCC(ret)) {
+    // An empty key must stay a real empty string. A null pointer is inserted as SQL NULL,
+    // and reading that column back rejects the endpoint.
+    if (access_key_.empty()) {
+      access_key_.assign_ptr("", 0);
+    }
     if (has_api_key && !access_key_.empty() && OB_FAIL(encrypt_access_key_(allocator, access_key_, access_key_))) {
       LOG_WARN("failed to encrypt access key", K(ret));
     } else if (OB_FAIL(check_valid())) {

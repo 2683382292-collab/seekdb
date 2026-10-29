@@ -186,6 +186,9 @@ int ObExprAIRerank::eval_ai_rerank(const ObExpr &expr, ObEvalCtx &ctx, ObDatum &
           }
           if (OB_FAIL(construct_batch_document_array(temp_allocator, document_array, i, end_idx, batch_document_array))) {
           } else if (OB_FAIL(inner_eval_ai_rerank(temp_allocator, *info, *endpoint_info, header_array, query, batch_document_array, batch_result_array))) {
+          } else if (batch_result_array->element_count() != end_idx - i) {
+            ret = OB_INVALID_DATA;
+            LOG_USER_ERROR(OB_INVALID_ARGUMENT, "ai_rerank, result count does not match documents");
           } else if (OB_FAIL(batch_result_add_base(temp_allocator, batch_result_array, i))) {
           } else if (OB_FAIL(compact_json_array_by_key(temp_allocator, result_array, batch_result_array, score_key, compact_array))) {
           } else {
@@ -385,10 +388,9 @@ int ObExprAIRerank::compact_json_array_by_key(ObIAllocator &allocator, ObJsonArr
   } else {
     int64_t count1 = array1->element_count();
     int64_t count2 = array2->element_count();
-    int64_t min_count = count1 < count2 ? count1 : count2;
     int64_t i = 0;
     int64_t j = 0;
-    while (i < min_count && j < min_count) {
+    while (OB_SUCC(ret) && i < count1 && j < count2) {
       ObJsonObject *obj1 = static_cast<ObJsonObject *>(array1->get_value(i));
       ObJsonObject *obj2 = static_cast<ObJsonObject *>(array2->get_value(j));
       if (OB_ISNULL(obj1) || OB_ISNULL(obj2)) {
@@ -396,10 +398,14 @@ int ObExprAIRerank::compact_json_array_by_key(ObIAllocator &allocator, ObJsonArr
       } else {
         ObJsonDouble *double1 = static_cast<ObJsonDouble *>(obj1->get_value(score_key));
         ObJsonDouble *double2 = static_cast<ObJsonDouble *>(obj2->get_value(score_key));
-        if (OB_ISNULL(double1) || OB_ISNULL(double2)) {
+        ObJsonInt *index1 = static_cast<ObJsonInt *>(obj1->get_value(INDEX_KEY));
+        ObJsonInt *index2 = static_cast<ObJsonInt *>(obj2->get_value(INDEX_KEY));
+        if (OB_ISNULL(double1) || OB_ISNULL(double2) || OB_ISNULL(index1) || OB_ISNULL(index2)) {
           ret = OB_ERR_UNEXPECTED;
         } else {
-          if (double1->value() > double2->value()) {
+          const bool take_left = double1->value() > double2->value()
+                                 || (double1->value() == double2->value() && index1->value() <= index2->value());
+          if (take_left) {
             if (OB_FAIL(result_array->append(obj1))) {
             }
             i++;

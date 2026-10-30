@@ -108,9 +108,9 @@ static const uint64_t OB_MIN_ID  = 0;//used for lower_bound
 #define INVISIBLE_COLUMN_FLAG (INT64_C(1) << 6)
 /* AI column layout.
    An AI result column carries AI_COLUMN_FLAG and keeps its whole definition inside
-   __all_column.extended_type_info, so a cold start can rebuild everything from the
-   table schema alone. Besides the result column every AI column owns three hidden
-   columns which hold the async state machine inside the row itself. */
+   __all_column.ai_column_info, so a cold start can rebuild everything from the table
+   schema alone. Besides the result column every AI column owns three hidden columns
+   which hold the async state machine inside the row itself. */
 #define AI_COLUMN_FLAG (INT64_C(1) << 7)
 #define AI_STATUS_COLUMN_FLAG (INT64_C(1) << 9)
 #define AI_LEASE_COLUMN_FLAG (INT64_C(1) << 10)

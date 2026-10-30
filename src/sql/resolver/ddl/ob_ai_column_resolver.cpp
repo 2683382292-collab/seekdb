@@ -188,7 +188,7 @@ struct HiddenColumnSpec
 
 const HiddenColumnSpec HIDDEN_COLUMN_SPECS[] = {
   { "__ai_status_", ObInt32Type, AI_STATUS_COLUMN_FLAG },
-  { "__ai_lease_", ObInt64Type, AI_LEASE_COLUMN_FLAG },
+  { "__ai_lease_", ObIntType, AI_LEASE_COLUMN_FLAG },
   { "__ai_retry_", ObInt32Type, AI_RETRY_COLUMN_FLAG },
 };
 

@@ -553,7 +553,7 @@ int ObDelUpdResolver::resolve_ai_column_assignments(ObIArray<ObTableAssignment> 
                                                        status_expr))) {
         LOG_WARN("fail to build the status expr", KR(ret));
       } else if (OB_FAIL(ObRawExprUtils::build_const_int_expr(*params_.expr_factory_,
-                                                              ObInt64Type,
+                                                              ObIntType,
                                                               0,
                                                               lease_expr))) {
         LOG_WARN("fail to build the lease expr", KR(ret));

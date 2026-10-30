@@ -17,6 +17,7 @@
 #pragma once
 
 #include "lib/ob_define.h"
+#include "lib/allocator/ob_allocator.h"
 #include "lib/string/ob_string.h"
 #include "share/schema/ob_ai_column_schema.h"
 #include "sql/resolver/ddl/ob_ai_column_define_ctx.h"

@@ -491,8 +491,8 @@ int ObAiColumnResolver::resolve_definition(ObIAllocator &allocator,
       // declaration of this very column can not hold the answer of the model.
       LOG_USER_ERROR(OB_ERR_COLUMN_SPEC, column_name.length(), column_name.ptr());
     } else if (!ai_column.is_embedding() && ai_column.get_prompt_hint().empty()) {
-      // 根据结果类型补充提示词: the definition carries the hint that tells the model which
-      // shape of answer the write back path accepts. An explicit prompt_hint wins.
+      // The hint of the result type tells the model which shape of answer the write back
+      // path accepts. An explicit prompt_hint wins.
       const char *hint = type_prompt_hint(result_column.get_data_type());
       if (OB_FAIL(ai_column.set_prompt_hint(
               ObString(static_cast<int32_t>(STRLEN(hint)), hint)))) {

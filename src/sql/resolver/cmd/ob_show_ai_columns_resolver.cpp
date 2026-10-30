@@ -39,7 +39,7 @@ namespace
 // The rows are produced by a generated select, so every value read from the schema has to
 // be quoted as a MySQL string literal. Only the quotes and the escape character itself are
 // special inside such a literal.
-int append_string_literal(ObSqlString &sql, const ObString &value)
+int append_string_literal(common::ObSqlString &sql, const ObString &value)
 {
   int ret = OB_SUCCESS;
   if (OB_FAIL(sql.append("'"))) {
@@ -159,7 +159,7 @@ int ObShowAiColumnsResolver::resolve_table(const ParseNode *relation_node,
 }
 
 int ObShowAiColumnsResolver::build_select_sql(const ObTableSchema &table_schema,
-                                              ObSqlString &sql)
+                                              common::ObSqlString &sql)
 {
   int ret = OB_SUCCESS;
   int64_t row_cnt = 0;
@@ -204,10 +204,10 @@ int ObShowAiColumnsResolver::append_column_row(const ObTableSchema &table_schema
                                                const ObColumnSchemaV2 &column,
                                                const ObAiColumnSchema &ai_column,
                                                const int64_t row_idx,
-                                               ObSqlString &sql)
+                                               common::ObSqlString &sql)
 {
   int ret = OB_SUCCESS;
-  ObSqlString depend_columns;
+  common::ObSqlString depend_columns;
   const ObIArray<uint64_t> &depend_column_ids = ai_column.get_depend_column_ids();
   for (int64_t i = 0; OB_SUCC(ret) && i < depend_column_ids.count(); ++i) {
     const ObColumnSchemaV2 *depend_column =

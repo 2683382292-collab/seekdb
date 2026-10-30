@@ -17,6 +17,7 @@
 #pragma once
 
 #include "lib/ob_define.h"
+#include "lib/allocator/ob_allocator.h"
 #include "lib/string/ob_string.h"
 #include "lib/container/ob_se_array.h"
 

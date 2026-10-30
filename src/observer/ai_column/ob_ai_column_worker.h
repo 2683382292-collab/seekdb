@@ -18,6 +18,7 @@
 
 #include "lib/ob_define.h"
 #include "lib/allocator/page_arena.h"
+#include "lib/container/ob_iarray.h"
 #include "lib/string/ob_sql_string.h"
 #include "lib/string/ob_string.h"
 #include "common/mysqlclient/ob_isql_client.h"

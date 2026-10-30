@@ -20,6 +20,10 @@
 
 namespace oceanbase
 {
+namespace common
+{
+class ObSqlString;
+}
 namespace share
 {
 namespace schema
@@ -31,7 +35,6 @@ class ObAiColumnSchema;
 } // namespace share
 namespace sql
 {
-class ObSqlString;
 
 // SHOW AI COLUMNS FROM <table>.
 //
@@ -51,12 +54,12 @@ private:
                     const share::schema::ObTableSchema *&table_schema,
                     common::ObString &database_name);
   int build_select_sql(const share::schema::ObTableSchema &table_schema,
-                       ObSqlString &select_sql);
+                       common::ObSqlString &select_sql);
   int append_column_row(const share::schema::ObTableSchema &table_schema,
                         const share::schema::ObColumnSchemaV2 &column,
                         const share::schema::ObAiColumnSchema &ai_column,
                         const int64_t row_idx,
-                        ObSqlString &select_sql);
+                        common::ObSqlString &select_sql);
   int resolve_select_sql(const common::ObString &select_sql);
 private:
   DISALLOW_COPY_AND_ASSIGN(ObShowAiColumnsResolver);

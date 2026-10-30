@@ -28,6 +28,7 @@ namespace schema
 {
 
 class ObTableSchema;
+class ObColumnSchemaV2;
 
 // Registry of the AI column definitions of one table.
 //

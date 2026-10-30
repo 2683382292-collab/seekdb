@@ -26,6 +26,7 @@
 #include "sql/engine/expr/ob_expr_lob_utils.h"
 #include "sql/rewrite/ob_transform_pre_process.h"
 #include "sql/resolver/ddl/ob_vec_index_builder_util.h"
+#include "sql/resolver/ddl/ob_ai_column_resolver.h"
 #include "sql/resolver/ddl/ob_fts_parser_resolver.h"
 #include "sql/session/ob_local_session_var.h"
 #include "query/ddl/ob_dynamic_partition_policy.h"
@@ -2284,6 +2285,16 @@ int ObDDLResolver::resolve_normal_column_attribute(ObColumnSchemaV2 &column,
       case T_VISIBLE:
       case T_INVISIBLE:
       {
+        break;
+      }
+      case T_AI_COLUMN_ATTR: {
+        // The definition is only staged here: the depend columns may be declared after the
+        // ai column, so it is resolved once the whole statement is known.
+        if (OB_FAIL(ObAiColumnResolver::stage_definition(params_,
+                                                        column.get_column_name_str(),
+                                                        attr_node))) {
+          SQL_RESV_LOG(WARN, "fail to stage ai column definition", K(ret), K(column));
+        }
         break;
       }
       default:  // won't be here

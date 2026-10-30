@@ -99,6 +99,10 @@ class ObSrsService;
 class ObAiService;
 class ObTimezoneMgr;
 }
+namespace observer
+{
+class ObAiColumnService;
+}
 namespace sql
 {
 class ObSqlMemoryManager;
@@ -678,6 +682,7 @@ public:
     return &ob_service_;
   }
   omt::ObAiService * ai_service() { return mods_ai_service_; }
+  observer::ObAiColumnService * ai_column_service() { return mods_ai_column_service_; }
   share::ObChangeStreamMgr * change_stream_mgr() { return mods_change_stream_mgr_; }
   // Explicit module lifecycle (ObServer owns modules; defined in ob_server_runtime_controller.cpp).
   int obs_construct_modules();
@@ -755,6 +760,7 @@ private:
   rootserver::ObSystemPackageLoadService * mods_system_package_load_service_ = nullptr;
   rootserver::ObDDLScheduler * mods_ddl_scheduler_ = nullptr;
   omt::ObAiService * mods_ai_service_ = nullptr;
+  observer::ObAiColumnService * mods_ai_column_service_ = nullptr;
   share::ObChangeStreamMgr * mods_change_stream_mgr_ = nullptr;
   ObLSRuntimeAdapter ls_runtime_adapter_;
 }; // end of class ObServer

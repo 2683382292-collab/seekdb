@@ -42,6 +42,7 @@ namespace sql
 {
 class ObIPLSqlRuntime;
 class ObMaintainDepInfoTaskQueue;
+class ObAiColumnDefineCtx;
 enum ObStmtScope
 {
   /*
@@ -379,7 +380,8 @@ struct ObResolverParams
        package_guard_(NULL),
        star_expansion_infos_(),
        is_resolve_fake_cte_table_(false),
-       is_in_view_(false)
+       is_in_view_(false),
+       ai_column_define_ctx_(NULL)
   {}
   bool is_force_trace_log() { return force_trace_log_; }
 
@@ -455,6 +457,8 @@ public:
   common::ObArray<ObStarExpansionInfo> star_expansion_infos_;
   bool is_resolve_fake_cte_table_;
   bool is_in_view_;
+  // 暂存 AI 列定义（仅 DDL 语句生命周期内有效，由 ObAiColumnDefineGuard 管理）
+  ObAiColumnDefineCtx *ai_column_define_ctx_;
 };
 } // end namespace sql
 } // end namespace oceanbase

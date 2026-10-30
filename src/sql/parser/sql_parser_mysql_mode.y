@@ -260,7 +260,7 @@ END_P SET_VAR DELIMITER
 //-----------------------------reserved keyword end-------------------------------------------------
 %token <non_reserved_keyword>
 //-----------------------------non_reserved keyword begin-------------------------------------------
-        ACCESS ACCOUNT ACTION ACTIVE ADDDATE AFTER AGAINST AGGREGATE AI ALGORITHM ALWAYS ALLOW ANALYSE ANY
+        ACCESS ACCOUNT ACTION ACTIVE ADDDATE AFTER AGAINST AGGREGATE AI AI_COMPLETE AI_EMBED ALGORITHM ALWAYS ALLOW ANALYSE ANY
         APPROX_COUNT_DISTINCT APPROX_COUNT_DISTINCT_SYNOPSIS APPROX_COUNT_DISTINCT_SYNOPSIS_MERGE
         ARRAY ASCII ASIS AT ATTRIBUTE AUTHORS AUTO AUTOEXTEND_SIZE AUTO_INCREMENT AUTO_INCREMENT_CACHE_SIZE
         AVG AVG_ROW_LENGTH ACTIVATE AVAILABILITY ASYNCHRONOUS AUDIT ADMIN AUTO_REFRESH API_MODE APPROX APPROXIMATE ARRAY_AGG ARRAY_FILTER ARRAY_FIRST ARRAY_MAP ARRAY_SORTBY
@@ -504,6 +504,7 @@ END_P SET_VAR DELIMITER
 %type <node> geometry_collection
 %type <node> merge_insert_types opt_empty_table_list user_host_or_current_user
 %type <node> id_dot_id id_dot_id_dot_id
+%type <node> ai_column_attribute opt_ai_column_option_list ai_column_option_list ai_column_option
 %type <node> vector_distance_expr vector_distance_metric
 %type <node> any_expr opt_null_pos lambda_expr lambda_expr_params
 %type <node_opt_parens> select_clause_set select_clause_set_body
@@ -6237,6 +6238,68 @@ not NULLX
 | INVISIBLE
 {
   malloc_terminal_node($$, result->malloc_pool_, T_INVISIBLE);
+}
+| ai_column_attribute
+{
+  $$ = $1;
+}
+;
+
+// AI column definition, e.g.
+//   summary TEXT AI_COMPLETE('text_model', body) (max_retry=3, timeout_sec=30)
+// The first argument of the function names the AI model, the remaining ones are the
+// expressions the result depends on. The node keeps three children so that the
+// resolver does not have to inspect the raw text again:
+//   [0] function name, [1] T_EXPR_LIST of arguments, [2] option list or NULL.
+ai_column_attribute:
+AI_COMPLETE '(' opt_expr_as_list ')' opt_ai_column_option_list
+{
+  ParseNode *params = NULL;
+  ParseNode *func_name = NULL;
+  if (NULL != $3) {
+    merge_nodes(params, result, T_EXPR_LIST, $3);
+  }
+  make_name_node(func_name, result->malloc_pool_, "ai_complete");
+  malloc_non_terminal_node($$, result->malloc_pool_, T_AI_COLUMN_ATTR, 3, func_name, params, $5);
+}
+| AI_EMBED '(' opt_expr_as_list ')' opt_ai_column_option_list
+{
+  ParseNode *params = NULL;
+  ParseNode *func_name = NULL;
+  if (NULL != $3) {
+    merge_nodes(params, result, T_EXPR_LIST, $3);
+  }
+  make_name_node(func_name, result->malloc_pool_, "ai_embed");
+  malloc_non_terminal_node($$, result->malloc_pool_, T_AI_COLUMN_ATTR, 3, func_name, params, $5);
+}
+;
+
+opt_ai_column_option_list:
+/*empty*/
+{
+  $$ = NULL;
+}
+| '(' ai_column_option_list ')'
+{
+  $$ = $2;
+}
+;
+
+ai_column_option_list:
+ai_column_option
+{
+  $$ = $1;
+}
+| ai_column_option_list ',' ai_column_option
+{
+  malloc_non_terminal_node($$, result->malloc_pool_, T_LINK_NODE, 2, $1, $3);
+}
+;
+
+ai_column_option:
+NAME_OB '=' expr_const
+{
+  malloc_non_terminal_node($$, result->malloc_pool_, T_AI_COLUMN_OPTION, 2, $1, $3);
 }
 ;
 
@@ -12649,6 +12712,8 @@ SHOW opt_extended_or_full TABLES opt_from_or_in_database_clause opt_show_conditi
 { malloc_non_terminal_node($$, result->malloc_pool_, T_SHOW_TABLE_STATUS, 2, $4, $5); }
 | SHOW PROCEDURE STATUS opt_from_or_in_database_clause opt_show_condition
 { malloc_non_terminal_node($$, result->malloc_pool_, T_SHOW_PROCEDURE_STATUS, 2, $4, $5); }
+| SHOW AI COLUMNS opt_from_or_in relation_factor
+{ malloc_non_terminal_node($$, result->malloc_pool_, T_SHOW_AI_COLUMNS, 1, $5); }
 | SHOW FUNCTION STATUS opt_from_or_in_database_clause opt_show_condition
 { malloc_non_terminal_node($$, result->malloc_pool_, T_SHOW_FUNCTION_STATUS, 2, $4, $5); }
 | SHOW TRIGGERS opt_from_or_in_database_clause opt_show_condition
@@ -16317,6 +16382,14 @@ NAME_OB
 {
   $$ = $1;
 }
+| AI_COMPLETE
+{
+  make_name_node($$, result->malloc_pool_, "ai_complete");
+}
+| AI_EMBED
+{
+  make_name_node($$, result->malloc_pool_, "ai_embed");
+}
 | DUMP
 {
   make_name_node($$, result->malloc_pool_, "dump");
@@ -16396,6 +16469,14 @@ NAME_OB
 | AI
 {
   make_name_node($$, result->malloc_pool_, "ai");
+}
+| AI_COMPLETE
+{
+  make_name_node($$, result->malloc_pool_, "ai_complete");
+}
+| AI_EMBED
+{
+  make_name_node($$, result->malloc_pool_, "ai_embed");
 }
 | MODEL
 {

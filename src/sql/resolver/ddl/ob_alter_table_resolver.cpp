@@ -25,6 +25,7 @@
 #include "sql/session/ob_local_session_var.h"
 #include "query/command/ob_root_command_service.h"
 #include "query/vector/ob_vector_index_util.h"
+#include "sql/resolver/ddl/ob_ai_column_resolver.h"
 
 namespace oceanbase
 {
@@ -55,7 +56,13 @@ ObAlterTableResolver::~ObAlterTableResolver()
 int ObAlterTableResolver::resolve(const ParseNode &parse_tree)
 {
   int ret = OB_SUCCESS;
-  if (OB_ISNULL(session_info_)) {
+  // The ai column staging area lives for exactly one statement: the destructor clears it on
+  // every exit path, so a definition staged by a MODIFY/CHANGE clause that is later
+  // rejected can never be picked up by the next statement.
+  ObAiColumnDefineGuard ai_column_guard(allocator_, params_);
+  if (OB_FAIL(ai_column_guard.get_ret())) {
+    SQL_RESV_LOG(WARN, "fail to install ai column define guard", K(ret));
+  } else if (OB_ISNULL(session_info_)) {
     ret = OB_ERR_UNEXPECTED;
     SQL_RESV_LOG(WARN, "session_info should not be null", K(ret));
   } else if (T_ALTER_TABLE != parse_tree.type_ ||
@@ -222,6 +229,24 @@ int ObAlterTableResolver::resolve(const ParseNode &parse_tree)
       if (OB_FAIL(resolve_hints(parse_tree.children_[ALTER_HINT],
           *alter_table_stmt, nullptr == index_schema_ ? *table_schema_ : *index_schema_))) {
       }
+    }
+
+    // AI column definitions are applied once every action of the statement is resolved: the
+    // altered ai column and the columns it depends on may come from different actions.
+    if (OB_SUCC(ret) && OB_NOT_NULL(table_schema_)) {
+      share::schema::AlterTableSchema &alter_table_schema =
+          alter_table_stmt->get_alter_table_arg().alter_table_schema_;
+      if (OB_FAIL(ObAiColumnResolver::resolve_alter_definitions(*allocator_,
+                                                               params_,
+                                                               *table_schema_,
+                                                               alter_table_schema))) {
+        SQL_RESV_LOG(WARN, "fail to resolve ai column definitions", K(ret));
+      }
+    }
+
+    // Regression protection: a staged definition must have been applied by the statement.
+    if (OB_FAIL(ai_column_guard.check_all_consumed(ret))) {
+      SQL_RESV_LOG(WARN, "ai column definition was not consumed", K(ret));
     }
     if (OB_SUCC(ret)){
       if (OB_FAIL(deep_copy_string_in_part_expr(get_alter_table_stmt()))) {

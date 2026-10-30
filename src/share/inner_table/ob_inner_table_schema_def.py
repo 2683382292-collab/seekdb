@@ -340,7 +340,11 @@ all_column_def = dict(
       ('sub_data_type', 'int', 'false', '0'),
       ('skip_index_attr', 'int', 'false', '0'),
       ('lob_chunk_size', 'int', 'false', 'OB_DEFAULT_LOB_CHUNK_SIZE'),
-      ('local_session_vars', 'longtext', 'true')
+      ('local_session_vars', 'longtext', 'true'),
+      # Definition of an AI column, empty for ordinary columns. Keeping it on the
+      # column row itself makes a cold start rebuild every AI column definition from
+      # the table schema without any additional inner table or registry reload.
+      ('ai_column_info', 'longtext', 'true')
   ]
   )
 

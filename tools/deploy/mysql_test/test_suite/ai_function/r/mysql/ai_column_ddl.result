@@ -1,0 +1,54 @@
+#
+# ai column: declaration, definition and the definitions that must be rejected
+#
+drop table if exists ai_column_ddl_t;
+drop table if exists ai_column_ddl_plain;
+# a completion column and an embedding column, both generated from the same source
+CREATE TABLE ai_column_ddl_t (id bigint primary key, title varchar(128), body text, summary text ai_complete('text_model', body) (max_retry=2, timeout_sec=10), emb vector(4) ai_embed('embed_model', body));
+# the definition is part of the table schema and can be inspected
+show ai columns from ai_column_ddl_t;
+# add, modify and change all take an ai column clause
+alter table ai_column_ddl_t add column t2 varchar(32) ai_complete('text_model', body) (max_retry=1);
+alter table ai_column_ddl_t modify column summary text ai_complete('text_model', title);
+alter table ai_column_ddl_t change column t2 t3 varchar(32) ai_complete('text_model', title);
+show ai columns from ai_column_ddl_t;
+# a table without an ai column answers with an empty definition list
+create table ai_column_ddl_plain (id bigint primary key, body text);
+show ai columns from ai_column_ddl_plain;
+# show ai columns of a table that does not exist is an error
+show ai columns from ai_column_ddl_missing;
+#
+# definitions that have to be rejected
+#
+# the result is written asynchronously, so it can not be NOT NULL
+create table ai_column_ddl_err1 (id bigint primary key, body text, s text not null ai_complete('m', body));
+ERROR 42000: Incorrect column specifier for column 's'
+# only ai_complete and ai_embed are ai column functions
+create table ai_column_ddl_err2 (id bigint primary key, body text, s text ai_summarize('m', body));
+# a completion writes a scalar, a vector column can not hold it
+create table ai_column_ddl_err3 (id bigint primary key, body text, s vector(4) ai_complete('m', body));
+ERROR 42000: Incorrect column specifier for column 's'
+# an embedding needs a vector column, its dimension is part of the definition
+create table ai_column_ddl_err4 (id bigint primary key, body text, s text ai_embed('m', body));
+ERROR 42000: Incorrect column specifier for column 's'
+# a synchronous ai column would block the DML on a remote call
+create table ai_column_ddl_err5 (id bigint primary key, body text, s text ai_complete('m', body) (sync_mode='sync'));
+ERROR 0A000: synchronous ai column not supported
+# an unknown option is reported, it is never silently ignored
+create table ai_column_ddl_err6 (id bigint primary key, body text, s text ai_complete('m', body) (magic=1));
+# a negative retry budget makes no sense
+create table ai_column_ddl_err7 (id bigint primary key, body text, s text ai_complete('m', body) (max_retry=-1));
+# a timeout has to be positive
+create table ai_column_ddl_err8 (id bigint primary key, body text, s text ai_complete('m', body) (timeout_sec=0));
+# chained ai columns are not supported, the scheduling order would be undefined
+create table ai_column_ddl_err9 (id bigint primary key, body text, s text ai_complete('m', body), t text ai_complete('m', s));
+ERROR 0A000: chained ai column not supported
+# a dependency has to be a column of the table
+create table ai_column_ddl_err10 (id bigint primary key, body text, s text ai_complete('m', missing_column));
+# a column can not be declared as an ai column twice in one statement
+create table ai_column_ddl_err11 (id bigint primary key, body text, s text ai_complete('m', body) ai_complete('m', body));
+# the same holds for a modify of an existing column
+alter table ai_column_ddl_t modify column summary text ai_complete('m', missing_column);
+# an ai column can not depend on itself
+alter table ai_column_ddl_t modify column summary text ai_complete('m', summary);
+drop table if exists ai_column_ddl_t, ai_column_ddl_plain;

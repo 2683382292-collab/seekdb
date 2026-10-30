@@ -72,6 +72,20 @@ protected:
 
   int resolve_additional_assignments(common::ObIArray<ObTableAssignment> &table_assigns,
                                      const ObStmtScope scope);
+  // An ai column and the three hidden columns it owns are written by the ai column
+  // service only, so any DML statement that tries to assign them is rejected.
+  int check_ai_column_not_assigned(const ObColumnRefRawExpr &column_expr) const;
+  // A change of a dependency column invalidates the stored result. The hidden state
+  // columns are reset inside the same row update, so the data change, the
+  // invalidation and the task creation are one transaction.
+  int resolve_ai_column_assignments(common::ObIArray<ObTableAssignment> &table_assigns,
+                                    const TableItem &table_item,
+                                    const share::schema::ObTableSchema &table_schema);
+  int add_ai_column_state_assignment(common::ObIArray<ObTableAssignment> &table_assigns,
+                                     const TableItem &table_item,
+                                     const share::schema::ObTableSchema &table_schema,
+                                     const uint64_t column_id,
+                                     ObRawExpr *value_expr);
   int generate_wrapper_expr_for_assignemnts(common::ObIArray<ObAssignment> &assigns,
                                             bool has_before_trigger);
 

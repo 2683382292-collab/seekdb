@@ -77,6 +77,7 @@
 #include "tcl/ob_savepoint_resolver.h"
 #include "sql/resolver/cmd/ob_variable_set_resolver.h"
 #include "sql/resolver/cmd/ob_show_resolver.h"
+#include "sql/resolver/cmd/ob_show_ai_columns_resolver.h"
 #include "sql/resolver/cmd/ob_diff_table_resolver.h"
 #include "sql/resolver/cmd/ob_merge_table_resolver.h"
 #include "sql/resolver/cmd/ob_kill_resolver.h"
@@ -224,6 +225,12 @@ int ObResolver::resolve(IsPrepared if_prepared, const ParseNode &parse_tree, ObS
       }
       case T_FORK_DATABASE: {
         REGISTER_STMT_RESOLVER(ForkDatabase);
+        break;
+      }
+      case T_SHOW_AI_COLUMNS: {
+        // SHOW AI COLUMNS is answered by a select statement generated from the table schema,
+        // so it takes the select resolver that can hand the built statement back.
+        REGISTER_SELECT_STMT_RESOLVER(ShowAiColumns);
         break;
       }
       case T_DIFF_TABLE: {

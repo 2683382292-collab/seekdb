@@ -25,6 +25,7 @@
 #include "sql/optimizer/ob_optimizer_util.h"
 #include "query/vector/ob_vector_index_util.h"
 #include "sql/resolver/ddl/ob_vec_index_builder_util.h"
+#include "sql/resolver/ddl/ob_ai_column_resolver.h"
 
 namespace oceanbase
 {
@@ -166,8 +167,13 @@ int ObCreateTableResolver::resolve(const ParseNode &parse_tree)
 {
   int ret = OB_SUCCESS;
   bool is_temporary_table = false;
+  // The ai column staging area lives for exactly one statement: the destructor clears it on
+  // every exit path, so a definition can never leak into the next statement.
+  ObAiColumnDefineGuard ai_column_guard(allocator_, params_);
   ParseNode *create_table_node = const_cast<ParseNode*>(&parse_tree);
-  if (OB_ISNULL(create_table_node)
+  if (OB_FAIL(ai_column_guard.get_ret())) {
+    SQL_RESV_LOG(WARN, "fail to install ai column define guard", K(ret));
+  } else if (OB_ISNULL(create_table_node)
       || T_CREATE_TABLE != create_table_node->type_
       || (CREATE_TABLE_NUM_CHILD != create_table_node->num_child_ &&
           CREATE_TABLE_AS_SEL_NUM_CHILD != create_table_node->num_child_)
@@ -397,6 +403,10 @@ int ObCreateTableResolver::resolve(const ParseNode &parse_tree)
       }
     }
 
+    // Regression protection: a staged definition must have been applied by the statement.
+    if (OB_FAIL(ai_column_guard.check_all_consumed(ret))) {
+      SQL_RESV_LOG(WARN, "ai column definition was not consumed", K(ret));
+    }
   }
   return ret;
 }
@@ -893,6 +903,18 @@ int ObCreateTableResolver::resolve_table_elements(const ParseNode *node,
           if (OB_FAIL(column_name_set_.set_refactored(name_key))) {
           }
         }
+      }
+    }
+
+    // AI columns are resolved after every column of the statement is known, because a
+    // depend column may be declared after the ai column itself. The hidden state columns
+    // are appended here so that the column ids stay dense.
+    if (OB_SUCC(ret) && RESOLVE_NON_COL != resolve_rule) {
+      if (OB_FAIL(ObAiColumnResolver::resolve_create_definitions(*allocator_,
+                                                                params_,
+                                                                table_schema,
+                                                                cur_column_id_))) {
+        SQL_RESV_LOG(WARN, "fail to resolve ai column definitions", K(ret));
       }
     }
 

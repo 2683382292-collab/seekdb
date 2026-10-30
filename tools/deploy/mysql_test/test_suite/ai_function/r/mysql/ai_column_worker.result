@@ -1,0 +1,36 @@
+#
+# ai column: the background service generates the result and writes it back
+#
+drop table if exists ai_column_worker_t;
+call DBMS_AI_SERVICE.DROP_AI_MODEL_ENDPOINT('ai_column_worker_completion');
+call DBMS_AI_SERVICE.DROP_AI_MODEL_ENDPOINT('ai_column_worker_embedding');
+call DBMS_AI_SERVICE.DROP_AI_MODEL('ai_column_worker_model');
+call DBMS_AI_SERVICE.DROP_AI_MODEL('ai_column_worker_embed_model');
+call DBMS_AI_SERVICE.CREATE_AI_MODEL('ai_column_worker_model', '{"type": "completion", "model_name": "mock-completion"}');
+call DBMS_AI_SERVICE.CREATE_AI_MODEL('ai_column_worker_embed_model', '{"type": "dense_embedding", "model_name": "mock-embedding"}');
+call DBMS_AI_SERVICE.CREATE_AI_MODEL_ENDPOINT('ai_column_worker_completion', '{"ai_model_name": "ai_column_worker_model", "url": "http://127.0.0.1:19120/v1/chat/completions", "access_key": "mock", "request_model_name": "mock-completion", "provider": "openai"}');
+call DBMS_AI_SERVICE.CREATE_AI_MODEL_ENDPOINT('ai_column_worker_embedding', '{"ai_model_name": "ai_column_worker_embed_model", "url": "http://127.0.0.1:19120/v1/embeddings", "access_key": "mock", "request_model_name": "mock-embedding", "provider": "openai"}');
+# a completion and an embedding are generated for both inserted rows
+create table ai_column_worker_t (id bigint primary key, body text, num_val int ai_complete('ai_column_worker_model', body) (max_retry=3), emb vector(4) ai_embed('ai_column_worker_embed_model', body));
+insert into ai_column_worker_t (id, body) values (1, 'hello'), (2, 'world');
+select id, num_val from ai_column_worker_t order by id;
+id	num_val
+1	42
+2	42
+# an update of the dependency invalidates the result and it is generated again
+update ai_column_worker_t set body = 'hello again' where id = 1;
+select id, num_val from ai_column_worker_t order by id;
+id	num_val
+1	42
+2	42
+# an unrelated ddl and a new row are served by the same definition
+alter table ai_column_worker_t add column note varchar(32);
+insert into ai_column_worker_t (id, body, note) values (3, 'third', 'n');
+select count(*) as ready_cnt from ai_column_worker_t;
+ready_cnt
+3
+drop table if exists ai_column_worker_t;
+call DBMS_AI_SERVICE.DROP_AI_MODEL_ENDPOINT('ai_column_worker_completion');
+call DBMS_AI_SERVICE.DROP_AI_MODEL_ENDPOINT('ai_column_worker_embedding');
+call DBMS_AI_SERVICE.DROP_AI_MODEL('ai_column_worker_model');
+call DBMS_AI_SERVICE.DROP_AI_MODEL('ai_column_worker_embed_model');

@@ -106,6 +106,16 @@ static const uint64_t OB_MIN_ID  = 0;//used for lower_bound
 #define RESERVED_COLUMN_FLAG_4 (INT64_C(1) << 4)
 #define RESERVED_COLUMN_FLAG_5 (INT64_C(1) << 5)
 #define INVISIBLE_COLUMN_FLAG (INT64_C(1) << 6)
+/* AI column layout.
+   An AI result column carries AI_COLUMN_FLAG and keeps its whole definition inside
+   __all_column.extended_type_info, so a cold start can rebuild everything from the
+   table schema alone. Besides the result column every AI column owns three hidden
+   columns which hold the async state machine inside the row itself. */
+#define AI_COLUMN_FLAG (INT64_C(1) << 7)
+#define AI_STATUS_COLUMN_FLAG (INT64_C(1) << 9)
+#define AI_LEASE_COLUMN_FLAG (INT64_C(1) << 10)
+#define AI_RETRY_COLUMN_FLAG (INT64_C(1) << 11)
+#define AI_HIDDEN_COLUMN_FLAGS (AI_STATUS_COLUMN_FLAG | AI_LEASE_COLUMN_FLAG | AI_RETRY_COLUMN_FLAG)
 // The logic of the new table without a primary key changes the column (partition key) to the primary key
 #define HEAP_ALTER_ROWKEY_FLAG (INT64_C(1) << 8)
 #define HEAP_TABLE_SORT_ROWKEY_FLAG (INT64_C(1) << 12) // 1:sortkey in new no pk table

@@ -1,0 +1,119 @@
+#owner: seekdb
+#owner group: seekdb
+
+--echo #
+--echo # ai column: declaration, definition and the definitions that must be rejected
+--echo #
+
+connection default;
+
+--disable_warnings
+drop table if exists ai_column_ddl_t;
+drop table if exists ai_column_ddl_plain;
+--enable_warnings
+
+--echo # a completion column and an embedding column, both generated from the same source
+CREATE TABLE ai_column_ddl_t (id bigint primary key, title varchar(128), body text, summary text ai_complete('text_model', body) (max_retry=2, timeout_sec=10), emb vector(4) ai_embed('embed_model', body));
+
+--echo # the definition is part of the table schema and can be inspected
+--disable_result_log
+show ai columns from ai_column_ddl_t;
+--enable_result_log
+
+--echo # add, modify and change all take an ai column clause
+alter table ai_column_ddl_t add column t2 varchar(32) ai_complete('text_model', body) (max_retry=1);
+alter table ai_column_ddl_t modify column summary text ai_complete('text_model', title);
+alter table ai_column_ddl_t change column t2 t3 varchar(32) ai_complete('text_model', title);
+--disable_result_log
+show ai columns from ai_column_ddl_t;
+--enable_result_log
+
+--echo # a table without an ai column answers with an empty definition list
+create table ai_column_ddl_plain (id bigint primary key, body text);
+--disable_result_log
+show ai columns from ai_column_ddl_plain;
+--enable_result_log
+
+--echo # show ai columns of a table that does not exist is an error
+# the message of this error carries the database name, the code is the assertion
+--disable_result_log
+--error 1146
+show ai columns from ai_column_ddl_missing;
+--enable_result_log
+
+--echo #
+--echo # definitions that have to be rejected
+--echo #
+
+--echo # the result is written asynchronously, so it can not be NOT NULL
+--error 1063
+create table ai_column_ddl_err1 (id bigint primary key, body text, s text not null ai_complete('m', body));
+
+--echo # only ai_complete and ai_embed are ai column functions
+# a syntax error reports the text around the offending token, the code is the assertion
+--disable_result_log
+--error 1064
+create table ai_column_ddl_err2 (id bigint primary key, body text, s text ai_summarize('m', body));
+--enable_result_log
+
+--echo # a completion writes a scalar, a vector column can not hold it
+--error 1063
+create table ai_column_ddl_err3 (id bigint primary key, body text, s vector(4) ai_complete('m', body));
+
+--echo # an embedding needs a vector column, its dimension is part of the definition
+--error 1063
+create table ai_column_ddl_err4 (id bigint primary key, body text, s text ai_embed('m', body));
+
+--echo # a synchronous ai column would block the DML on a remote call
+--error 1235
+create table ai_column_ddl_err5 (id bigint primary key, body text, s text ai_complete('m', body) (sync_mode='sync'));
+
+--echo # an unknown option is reported, it is never silently ignored
+--disable_result_log
+--error 1063
+create table ai_column_ddl_err6 (id bigint primary key, body text, s text ai_complete('m', body) (magic=1));
+--enable_result_log
+
+--echo # a negative retry budget makes no sense
+--disable_result_log
+--error 1063
+create table ai_column_ddl_err7 (id bigint primary key, body text, s text ai_complete('m', body) (max_retry=-1));
+--enable_result_log
+
+--echo # a timeout has to be positive
+--disable_result_log
+--error 1063
+create table ai_column_ddl_err8 (id bigint primary key, body text, s text ai_complete('m', body) (timeout_sec=0));
+--enable_result_log
+
+--echo # chained ai columns are not supported, the scheduling order would be undefined
+--error 1235
+create table ai_column_ddl_err9 (id bigint primary key, body text, s text ai_complete('m', body), t text ai_complete('m', s));
+
+--echo # a dependency has to be a column of the table
+--disable_result_log
+--error 1063
+create table ai_column_ddl_err10 (id bigint primary key, body text, s text ai_complete('m', missing_column));
+--enable_result_log
+
+--echo # a column can not be declared as an ai column twice in one statement
+--disable_result_log
+--error 1063
+create table ai_column_ddl_err11 (id bigint primary key, body text, s text ai_complete('m', body) ai_complete('m', body));
+--enable_result_log
+
+--echo # the same holds for a modify of an existing column
+--disable_result_log
+--error 1063
+alter table ai_column_ddl_t modify column summary text ai_complete('m', missing_column);
+--enable_result_log
+
+--echo # an ai column can not depend on itself
+--disable_result_log
+--error 1063
+alter table ai_column_ddl_t modify column summary text ai_complete('m', summary);
+--enable_result_log
+
+--disable_warnings
+drop table if exists ai_column_ddl_t, ai_column_ddl_plain;
+--enable_warnings

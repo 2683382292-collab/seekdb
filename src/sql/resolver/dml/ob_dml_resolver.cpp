@@ -1839,6 +1839,12 @@ int ObDMLResolver::resolve_basic_column_item(const TableItem &table_item,
   if (NULL == stmt) {
     stmt = get_stmt();
   }
+  // The ai column service maintains the hidden state columns of an ai column with inner
+  // SQL, so an internal session may name them. A user statement still may not: the
+  // hidden columns stay invisible to a name outside of the schema.
+  if (OB_NOT_NULL(session_info_) && session_info_->is_inner()) {
+    include_hidden = true;
+  }
   if (OB_ISNULL(stmt)
       || OB_ISNULL(schema_checker_)
       || OB_ISNULL(schema_guard = schema_checker_->get_schema_guard())

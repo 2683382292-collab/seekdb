@@ -1056,6 +1056,12 @@ int ObSchemaRetrieveUtils::fill_column_schema(const bool check_deleted, T &resul
       } else {}
     }
 
+    // The AI column definition lives on the column row itself, which is what lets a
+    // cold start rebuild every AI column from the table schema alone.
+    if (OB_SUCC(ret) && column.is_ai_column()) {
+      EXTRACT_VARCHAR_FIELD_TO_CLASS_MYSQL(result, ai_column_info, column);
+    }
+
     if (OB_SUCC(ret) && column.is_generated_column()) {
       bool skip_null_error = true;
       bool skip_column_error = true;

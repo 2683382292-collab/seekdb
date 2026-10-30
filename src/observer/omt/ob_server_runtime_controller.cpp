@@ -71,6 +71,7 @@
 #include "sql/dtl/ob_dtl_interm_result_manager.h"
 #include "sql/session/ob_sql_session_mgr.h"
 #include "observer/omt/ob_ai_service.h"
+#include "observer/ai_column/ob_ai_column_service.h"
 #include "storage/allocator/ob_memstore_allocator.h"  // relocated-definition owner
 #include "share/io/ob_io_manager.h"  // relocated-definition owner
 #include "share/ob_io_device_helper.h"
@@ -1166,6 +1167,7 @@ int ObServer::obs_construct_modules()
   if (OB_SUCC(ret) && OB_FAIL(server_module_new_default(mods_system_package_load_service_))) { SERVER_LOG(WARN, "mods_system_package_load_service_ fail", KR(ret)); }
   if (OB_SUCC(ret) && OB_FAIL(server_module_new_default(mods_ddl_scheduler_))) { SERVER_LOG(WARN, "mods_ddl_scheduler_ fail", KR(ret)); }
   if (OB_SUCC(ret) && OB_FAIL(server_module_new_default(mods_ai_service_))) { SERVER_LOG(WARN, "mods_ai_service_ fail", KR(ret)); }
+  if (OB_SUCC(ret) && OB_FAIL(server_module_new_default(mods_ai_column_service_))) { SERVER_LOG(WARN, "mods_ai_column_service_ fail", KR(ret)); }
   if (OB_SUCC(ret) && OB_FAIL(server_module_new_default(mods_change_stream_mgr_))) { SERVER_LOG(WARN, "mods_change_stream_mgr_ fail", KR(ret)); }
   if (OB_SUCC(ret)) {
 #define BIND_SERVICE(getter, type) \
@@ -1404,6 +1406,7 @@ int ObServer::obs_init_modules()
   if (OB_SUCC(ret) && OB_FAIL(rootserver::ObSystemPackageLoadService::server_module_init(mods_system_package_load_service_))) { SERVER_LOG(WARN, "mods_system_package_load_service_ fail", KR(ret)); }
   if (OB_SUCC(ret) && OB_FAIL(rootserver::ObDDLScheduler::server_module_init(mods_ddl_scheduler_))) { SERVER_LOG(WARN, "mods_ddl_scheduler_ fail", KR(ret)); }
   if (OB_SUCC(ret) && OB_FAIL(ObAiService::server_module_init(mods_ai_service_))) { SERVER_LOG(WARN, "mods_ai_service_ fail", KR(ret)); }
+  if (OB_SUCC(ret) && OB_FAIL(observer::ObAiColumnService::server_module_init(mods_ai_column_service_))) { SERVER_LOG(WARN, "mods_ai_column_service_ fail", KR(ret)); }
   if (OB_SUCC(ret) && OB_FAIL(ObChangeStreamMgr::server_module_init(
       mods_change_stream_mgr_,
       *mods_log_storage_adapter_,
@@ -1462,6 +1465,7 @@ int ObServer::obs_start_modules()
   if (OB_SUCC(ret) && OB_FAIL(server_module_start_default(mods_rb_mem_mgr_))) { SERVER_LOG(WARN, "mods_rb_mem_mgr_ fail", KR(ret)); }
   if (OB_SUCC(ret) && OB_FAIL(server_module_start_default(mods_plugin_vector_index_service_))) { SERVER_LOG(WARN, "mods_plugin_vector_index_service_ fail", KR(ret)); }
   if (OB_SUCC(ret) && OB_FAIL(server_module_start_default(mods_ai_service_))) { SERVER_LOG(WARN, "mods_ai_service_ fail", KR(ret)); }
+  if (OB_SUCC(ret) && OB_FAIL(server_module_start_default(mods_ai_column_service_))) { SERVER_LOG(WARN, "mods_ai_column_service_ fail", KR(ret)); }
   if (OB_SUCC(ret) && OB_FAIL(server_module_start_default(mods_change_stream_mgr_))) { SERVER_LOG(WARN, "mods_change_stream_mgr_ fail", KR(ret)); }
   return ret;
 }
@@ -1470,6 +1474,7 @@ void ObServer::obs_stop_modules()
 {
   server_module_stop_default(mods_shared_macro_block_mgr_);
   server_module_stop_default(mods_change_stream_mgr_);
+  server_module_stop_default(mods_ai_column_service_);
   server_module_stop_default(mods_ai_service_);
   rootserver::ObDDLScheduler::server_module_stop(mods_ddl_scheduler_);
   server_module_stop_default(mods_plugin_vector_index_service_);
@@ -1513,6 +1518,7 @@ void ObServer::obs_wait_modules()
 {
   server_module_wait_default(mods_shared_macro_block_mgr_);
   server_module_wait_default(mods_change_stream_mgr_);
+  server_module_wait_default(mods_ai_column_service_);
   server_module_wait_default(mods_ai_service_);
   rootserver::ObDDLScheduler::server_module_wait(mods_ddl_scheduler_);
   server_module_wait_default(mods_plugin_vector_index_service_);
@@ -1557,6 +1563,7 @@ void ObServer::obs_destroy_modules()
 {
   server_module_destroy_default(mods_shared_macro_block_mgr_);
   server_module_destroy_default(mods_change_stream_mgr_);
+  server_module_destroy_default(mods_ai_column_service_);
   server_module_destroy_default(mods_ai_service_);
   server_module_destroy_default(mods_ddl_scheduler_);
   server_module_destroy_default(mods_system_package_load_service_);

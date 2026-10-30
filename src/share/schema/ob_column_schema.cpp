@@ -82,6 +82,7 @@ int ObColumnSchemaV2::assign(const ObColumnSchemaV2 &src_schema)
     } else if (OB_FAIL(deep_copy_obj(src_schema.cur_default_value_, cur_default_value_))) {
     } else if (OB_FAIL(deep_copy_str(src_schema.column_name_, column_name_))) {
     } else if (OB_FAIL(deep_copy_str(src_schema.comment_, comment_))) {
+    } else if (OB_FAIL(deep_copy_str(src_schema.ai_column_info_, ai_column_info_))) {
     } else if (OB_FAIL(set_extended_type_info(src_schema.extended_type_info_))) {
     } else if (src_schema.column_ref_idxs_ != NULL) {
       if (OB_FAIL(alloc_column_ref_set())) {
@@ -128,6 +129,7 @@ int64_t ObColumnSchemaV2::get_convert_size() const
     convert_size += extended_type_info_.at(i).length() + 1;
   }
   convert_size += local_session_vars_.get_deep_copy_size();
+  convert_size += ai_column_info_.length() + 1;
   return convert_size;
 }
 
@@ -176,6 +178,7 @@ void ObColumnSchemaV2::reset()
   cur_default_value_.reset();
   column_name_.reset();
   comment_.reset();
+  ai_column_info_.reset();
   column_flags_ = NON_CASCADE_FLAG;
   column_ref_idxs_ = NULL;
   prev_column_id_ = UINT64_MAX;
@@ -235,7 +238,8 @@ OB_DEF_SERIALIZE(ObColumnSchemaV2)
                 sub_type_,
                 skip_index_attr_,
                 lob_chunk_size_,
-                local_session_vars_);
+                local_session_vars_,
+                ai_column_info_);
   }
 
   return ret;
@@ -296,6 +300,9 @@ OB_DEF_DESERIALIZE(ObColumnSchemaV2)
                 skip_index_attr_,
                 lob_chunk_size_,
                 local_session_vars_);
+    // The decoded string points into the serialization buffer, it has to be deep
+    // copied into the schema allocator like column_name_ and comment_.
+    OB_UNIS_DECODE_AND_FUNC(ai_column_info_, deep_copy_str);
   }
   return ret;
 }
@@ -340,7 +347,8 @@ OB_DEF_SERIALIZE_SIZE(ObColumnSchemaV2)
               sub_type_,
               skip_index_attr_,
               lob_chunk_size_,
-              local_session_vars_);
+              local_session_vars_,
+              ai_column_info_);
   return len;
 }
 

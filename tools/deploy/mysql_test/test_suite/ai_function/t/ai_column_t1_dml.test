@@ -1,0 +1,53 @@
+#owner: seekdb
+#owner group: seekdb
+
+--echo #
+--echo # ai column: the result column is produced by the background service, never by dml
+--echo #
+
+connection default;
+
+--disable_warnings
+drop table if exists ai_column_t1;
+--enable_warnings
+
+create table ai_column_t1 (id bigint primary key, title varchar(128), body text, summary text ai_complete('text_model', body));
+
+--echo # a plain insert leaves the result null and the row pending
+insert into ai_column_t1 (id, title, body) values (1, 'first', 'hello');
+select id, summary from ai_column_t1 order by id;
+
+--echo # the result column can not be assigned by a client
+--error 1235
+insert into ai_column_t1 (id, body, summary) values (2, 'world', 'manual');
+--error 1235
+update ai_column_t1 set summary = 'manual' where id = 1;
+--error 1235
+insert into ai_column_t1 (id, body) values (2, 'world') on duplicate key update summary = 'manual';
+
+--echo # updating a column the result depends on leaves the result null until the service runs
+update ai_column_t1 set body = 'hello again' where id = 1;
+select id, body, summary from ai_column_t1 order by id;
+
+--echo # updating a column the result does not depend on leaves the result alone as well
+update ai_column_t1 set title = 'second' where id = 1;
+select id, title, summary from ai_column_t1 order by id;
+
+--echo # the bookkeeping columns are hidden from the user session
+# the message of this error names the column, the code is the assertion
+--disable_result_log
+--error 1054
+select __ai_status_summary from ai_column_t1;
+--enable_result_log
+
+--echo # the rows of a rolled back transaction leave nothing behind
+begin;
+insert into ai_column_t1 (id, body) values (2, 'a'), (3, 'b');
+rollback;
+select count(*) as row_cnt from ai_column_t1;
+
+--echo # a deleted row takes its pending state with it
+delete from ai_column_t1 where id = 1;
+select count(*) as row_cnt from ai_column_t1;
+
+drop table if exists ai_column_t1;

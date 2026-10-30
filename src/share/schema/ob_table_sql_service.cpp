@@ -3221,6 +3221,7 @@ int ObTableSqlService::gen_column_dml_without_check(
                          || (OB_FAIL(dml.add_column("skip_index_attr", column.get_skip_index_attr().get_packed_value())))
                          || (OB_FAIL(dml.add_column("lob_chunk_size", column.get_lob_chunk_size())))
                          || (OB_FAIL(dml.add_column("local_session_vars", ObHexEscapeSqlStr(local_session_var))))
+                         || (OB_FAIL(dml.add_column("ai_column_info", ObHexEscapeSqlStr(column.get_ai_column_info()))))
                          || OB_FAIL(dml.add_gmt_create())
                          || OB_FAIL(dml.add_gmt_modified()))) {
     }

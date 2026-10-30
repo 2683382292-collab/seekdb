@@ -2274,6 +2274,13 @@ typedef enum ObItemType
   T_DIFF_TABLE = 4918,
   T_MERGE_TABLE = 4919,
   T_FLUSH_PRIVILEGES = 4920,
+  // AI column definition attached to a column of CREATE TABLE / ALTER TABLE.
+  // Children: [0] function name, [1] expr list, [2] option list.
+  T_AI_COLUMN_ATTR = 4921,
+  // One key=value option of an AI column definition, e.g. max_retry=3.
+  T_AI_COLUMN_OPTION = 4922,
+  // SHOW AI COLUMNS FROM <table>. Child [0] is the relation factor of the table.
+  T_SHOW_AI_COLUMNS = 4923,
   T_MAX //Attention: add a new type before T_MAX
 } ObItemType;
 

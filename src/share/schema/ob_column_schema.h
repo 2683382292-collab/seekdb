@@ -143,6 +143,13 @@ int assign(const ObColumnSchemaV2 &src_schema);
   inline int set_comment(const common::ObString &comment) { return deep_copy_str(comment, comment_); }
   inline void set_on_update_current_timestamp(const bool is_on_update_for_timestamp) { on_update_current_timestamp_ = is_on_update_for_timestamp; }
   int set_extended_type_info(const common::ObIArray<common::ObString> &info);
+
+  // Serialized definition of an AI column, empty for ordinary columns. It is stored
+  // on the column row (__all_column.ai_column_info) instead of a separate inner table
+  // so that a cold start rebuilds every AI column from the table schema alone.
+  inline int set_ai_column_info(const common::ObString &info)
+  { return deep_copy_str(info, ai_column_info_); }
+  inline const common::ObString &get_ai_column_info() const { return ai_column_info_; }
   int add_type_info(const common::ObString &type_info);
   inline void set_prev_column_id(const uint64_t id) { prev_column_id_ = id; }
   inline void set_next_column_id(const uint64_t id) { next_column_id_ = id; }
@@ -321,6 +328,19 @@ int assign(const ObColumnSchemaV2 &src_schema);
   inline bool is_on_update_current_timestamp() const { return on_update_current_timestamp_; }
   inline bool is_enum_or_set() const { return meta_type_.is_enum_or_set(); }
 
+  // AI column accessors. The whole AI column definition is stored in
+  // extended_type_info(), which is already part of both the binary schema
+  // serialization and the __all_column row, so nothing else has to be persisted.
+  inline bool is_ai_column() const { return 0 != (column_flags_ & AI_COLUMN_FLAG); }
+  inline bool is_ai_status_column() const { return 0 != (column_flags_ & AI_STATUS_COLUMN_FLAG); }
+  inline bool is_ai_lease_column() const { return 0 != (column_flags_ & AI_LEASE_COLUMN_FLAG); }
+  inline bool is_ai_retry_column() const { return 0 != (column_flags_ & AI_RETRY_COLUMN_FLAG); }
+  inline bool is_ai_hidden_column() const { return 0 != (column_flags_ & AI_HIDDEN_COLUMN_FLAGS); }
+  inline void set_is_ai_column(const bool is_ai) { add_or_del_column_flag(AI_COLUMN_FLAG, is_ai); }
+  inline void set_is_ai_status_column(const bool is_ai) { add_or_del_column_flag(AI_STATUS_COLUMN_FLAG, is_ai); }
+  inline void set_is_ai_lease_column(const bool is_ai) { add_or_del_column_flag(AI_LEASE_COLUMN_FLAG, is_ai); }
+  inline void set_is_ai_retry_column(const bool is_ai) { add_or_del_column_flag(AI_RETRY_COLUMN_FLAG, is_ai); }
+
   inline static bool is_hidden_pk_column_id(const uint64_t column_id);
   inline bool is_heap_table_primary_key_column() const 
   { return ::oceanbase::share::schema::is_heap_table_primary_key_column(column_flags_); }
@@ -381,6 +401,7 @@ private:
   common::ObString column_name_;
   common::ObString comment_;
   common::ObArrayHelper<common::ObString> extended_type_info_;//used for enum and set
+  common::ObString ai_column_info_;//serialized definition of an ai column, empty otherwise
   uint64_t prev_column_id_;
   uint64_t next_column_id_;
   int64_t encoding_type_; // for test, no need serialization

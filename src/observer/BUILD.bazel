@@ -209,6 +209,17 @@ cc_library(
     visibility = ["//src/wasm:__pkg__"],
 )
 
+# White box unit tests compile against the same header graph as the runtime and link the
+# prebuilt liboceanbase, mirroring the storage and oblib test packages. Only the header
+# graph is exposed: the test owns its own main and must not pull the observer sources in.
+cc_library(
+    name = "observer_unit_test_headers",
+    testonly = True,
+    deps = [":observer_internal_interface"],
+    tags = ["manual"],
+    visibility = ["//unittest:__subpackages__"],
+)
+
 
 _OBSERVER_RUNTIME_UNITY_GROUPS = OBSERVER_UNITY_GROUPS + singleton_unity_groups(
     OBSERVER_STANDALONE_SOURCES,
